@@ -4,15 +4,43 @@ Rust HTTP service using Axum and Tokio. Authentication is not implemented yet.
 
 ## Development
 
-Install a stable Rust toolchain, then run:
+Install a stable Rust toolchain and PostgreSQL (or Docker). To start a local database:
+
+```sh
+read -rsp 'Local PostgreSQL password: ' POSTGRES_PASSWORD; echo
+export POSTGRES_PASSWORD
+docker run --name crow-auth-postgres --rm -d \
+  -e POSTGRES_USER=crow_auth -e POSTGRES_PASSWORD -e POSTGRES_DB=crow_auth \
+  -p 127.0.0.1:5432:5432 postgres:17
+docker exec crow-auth-postgres pg_isready -U crow_auth -d crow_auth
+unset POSTGRES_PASSWORD
+```
+
+Wait until `pg_isready` reports that the database accepts connections. Set
+`DATABASE_URL` in your shell using your local credentials (URL-encode special
+characters in the username and password). This is a placeholder, not a working credential:
+
+```sh
+export DATABASE_URL='postgres://<user>:<url-encoded-password>@127.0.0.1:5432/crow_auth'
+```
+
+Then run:
 
 ```sh
 cargo run --locked
 ```
 
 The server listens on `127.0.0.1:3000`. `GET /health` returns `ok`.
+At startup it connects a SQLx PostgreSQL pool, runs `SELECT 1`, and stores the pool
+in Axum application state. Missing configuration or an unavailable database stops
+startup with an error that does not include credentials. `/health` is a basic HTTP
+liveness endpoint; it does not check ongoing database health.
 
 ```sh
 cargo check --locked
 curl --fail http://127.0.0.1:3000/health
 ```
+
+Stop the local database with `docker stop crow-auth-postgres`. This disposable
+container does not retain data after removal. User tables and authentication
+flows are not included yet.
