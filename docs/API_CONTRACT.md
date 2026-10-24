@@ -7,10 +7,10 @@ security enforcement. OAuth 2.0 Authorization Code Flow with PKCE S256 and OIDC
 Core are the chosen initial protocol. This is a planned contract, not implemented
 compatibility or certification. Use OAuth 2.0 security best practice (RFC 9700),
 PKCE (RFC 7636), discovery, Bearer token usage and RFC 7009 revocation.
-Portal/browser-internal JSON shapes remain proposals; standard wire formats do not.
-Standards requirements are mandatory. Crow-specific protocol choices remain draft
-until implementation review; changing accepted behavior requires updating Product
-and its enforcement/acceptance checks together.
+Internal browser/management endpoint shapes are proposals; standard wire formats
+follow the cited specifications. Protocol choices below are accepted except where
+explicitly marked unresolved. Changes must update their owning document and the
+relevant milestone evidence.
 
 ## Discovery and public keys
 
@@ -23,7 +23,7 @@ The issuer is one configured HTTPS URL, never inferred from Host headers.
 - `response_modes_supported`: `["query"]`
 - `authorization_response_iss_parameter_supported`: `true` (RFC 9207)
 - `grant_types_supported`: `["authorization_code", "refresh_token"]`
-- `subject_types_supported`: `["public"]` (the immutable shared Crow UUID)
+- `subject_types_supported`: `["pairwise"]` (stable opaque subjects per sector)
 - `id_token_signing_alg_values_supported`: `["RS256"]`
 - `token_endpoint_auth_methods_supported`: `["client_secret_basic"]`
 - `revocation_endpoint_auth_methods_supported`: `["client_secret_basic"]`
@@ -34,6 +34,15 @@ The issuer is one configured HTTPS URL, never inferred from Host headers.
 `GET /.well-known/jwks.json` exposes public RSA keys only: `kid`, `kty=RSA`,
 `use=sig`, `alg=RS256`, `n`, `e`. Follow Architecture key rotation/cache rules.
 These two endpoints are public and do not need client authentication.
+
+## Pairwise subject sectors
+
+Follow OIDC pairwise subject rules. Initially the sector is the hostname of the
+registered redirect URI; all callbacks for one client must share that hostname.
+Clients in the same sector receive the same subject for a user.
+Custom sector_identifier_uri registration is unsupported initially. A change of
+sector changes subject identity: reject sector-changing callback edits until an
+explicit migration procedure exists.
 
 ## Authorization: GET /oauth/authorize
 
@@ -96,12 +105,9 @@ and multiple authentication mechanisms. Responses use `Cache-Control: no-store`
 and `Pragma: no-cache`. Redact credentials, tokens and callback queries in logs.
 
 Code exchange fields: `grant_type=authorization_code`, `code`, `redirect_uri`,
-`code_verifier`. Validate client, enabled state, exact callback and all code/PKCE
-bindings. Consume the code and create the refresh family (only if offline access
-was granted) in one PostgreSQL transaction. Prepare signed tokens before commit;
-return them only after confirmed commit. Signing failure rolls back everything.
-Code replay returns invalid_grant and follows Architecture's bound replay/grant
-revocation rules; invalid client/PKCE attempts must not revoke legitimate grants.
+`code_verifier`. Validate client, enabled state, exact callback, expiry and all
+code/PKCE bindings. Follow [Architecture's transaction and replay rules](ARCHITECTURE.md#transactions-and-failures).
+Code replay returns invalid_grant; invalid bindings must not revoke legitimate grants.
 
 Example success with offline access:
 
@@ -109,20 +115,16 @@ Example success with offline access:
 {"access_token":"<access-JWT>","token_type":"Bearer","expires_in":600,"id_token":"<ID-JWT>","refresh_token":"<opaque-token>","scope":"openid profile crow.subscription offline_access"}
 ```
 
-ID tokens follow Architecture: RS256, client audience, issuer, UUID sub, timestamps,
-auth_time and original nonce; profile permits preferred_username. Access tokens
-have the Crow resource audience, issuing client_id and scopes. Never interchange
-the two token types. The backend validates state before exchange and validates
-the ID token including nonce before establishing its local browser session.
+Token claims and validation are defined below.
 
 Refresh fields: `grant_type=refresh_token`, `refresh_token`, optional `scope`.
 Omitting scope preserves the grant; supplied scopes must be a subset. Rotation
-cannot regain dropped scopes. Validate enabled client and family ownership, lock
-records and atomically consume/create successors and update idle expiry.
-Commit family revocation on reuse even when returning invalid_grant. Preserve
-the original 30-day deadline and seven-day idle limit. Refresh returns a new access
-and refresh token, expires_in, token_type and scope; omit ID tokens on refresh
-(OIDC permits this). No grace window or idempotent response replay.
+cannot regain dropped scopes. Validate enabled client and family ownership.
+Refresh returns a new access and refresh token, expires_in, token_type and scope;
+omit ID tokens on refresh (OIDC permits this).
+[Architecture](ARCHITECTURE.md#refresh-and-revocation) owns atomic rotation and the
+unresolved duplicate/retry policy. Do not implement or publish refresh support
+until that policy and its protocol outcomes are resolved.
 
 OAuth token errors are top-level JSON, for example:
 
@@ -135,19 +137,39 @@ unauthorized_client, unsupported_grant_type; invalid_client uses HTTP 401 and an
 appropriate WWW-Authenticate challenge for failed Basic authentication. Dependency
 failure returns HTTP 503 with a safe operational error response and no tokens;
 this is an HTTP availability failure, not an additional OAuth token error code. A generic 503
-never proves rollback. An uncertain commit or lost success response requires fresh
-authorization; clients must not blindly retry. Define any explicit safe-retry
+never proves rollback. An uncertain code-exchange commit or lost exchange success requires fresh
+authorization; refresh failure handling remains subject to its design gate. Define any explicit safe-retry
 signal before allowing bounded retries after confirmed rollback.
+
+## Token claims and validation
+
+Access JWT headers: `alg=RS256`, `kid`, `typ=at+jwt`. Follow RFC 9068:
+include `iss`, pairwise opaque `sub`, configured Crow resource `aud`,
+`client_id`, `scope`, `iat`, `exp` and unique `jti`.
+ID tokens use `typ=JWT`, RS256 and the single integrating client as `aud`;
+include `iss`, the same pairwise `sub`, `iat`, `exp`, original `auth_time`
+and request `nonce`. The profile scope permits preferred_username.
+Lifetimes are owned by [Product](PRODUCT.md#sessions-and-failure-behavior).
+Subscription status is never a token claim.
+
+Validate signature, explicit RS256 allowlist, known key, exact configured issuer,
+claim types, expiry and issuance time with 30 seconds clock tolerance.
+Crow resources additionally require their resource audience, enabled issuing
+client, required scopes and a grant that has not been replay-revoked.
+Resolve the subject in that client's context to the internal user; never treat a
+pairwise subject as an internal UUID. ID tokens cannot authorize resource APIs.
+Clients validate ID-token client audience and nonce against the initiating
+browser session, after validating state at the callback. Compare UserInfo sub to
+the ID-token sub. Key provisioning and rotation belong to
+[Architecture](ARCHITECTURE.md#token-signing-and-keys).
 
 ## UserInfo: GET /oauth/userinfo
 
 Require `Authorization: Bearer <access-token>`, no additional client secret.
-Validate signature, issuer, Crow resource audience, expiry, enabled client_id,
-absence of replay revocation for the token's grant and
-openid scope; derive user from sub. Return `{"sub":"<UUID>"}` and include
-`preferred_username` when profile is granted. Clients must compare this sub to
-the ID token's sub. Never return another user's data or accept an ID token.
-Use RFC 6750 Bearer errors/challenges, including insufficient_scope where applicable.
+Apply [token validation](#token-claims-and-validation) and require openid scope.
+Return `{"sub":"<pairwise-opaque-subject>"}` and include preferred_username
+when profile is granted. Use RFC 6750 Bearer errors/challenges, including
+insufficient_scope where applicable.
 
 ## Subscription: GET /api/subscription
 
@@ -172,25 +194,31 @@ OIDC RP-initiated logout; discovery must not advertise end_session_endpoint.
 
 ## Crow browser and portal endpoints
 
-These are internal JSON APIs, not OAuth grants. GET /login without a bound app
-flow is portal login; /oauth/authorize starts app flows and routes to hosted UI.
-GET /register preserves a validated flow. Expired/invalid app flows require restart
-and never silently fall back to portal login. POST /api/hosted/login and
-/api/hosted/register accept username/password only from Crow pages with browser
-binding, CSRF and Origin checks. Passwords contain 15–128 Unicode code points.
-POST /api/hosted/consent approves/denies an authenticated pending flow.
+These are same-origin internal browser handlers, not OAuth grants.
+Axum serves templates and accepts ordinary form submissions; HTMX may request
+HTML fragments. Full-page and enhanced requests use identical authorization and
+[browser security controls](ARCHITECTURE.md#browser-security-and-sessions).
+Successful ordinary forms use a 303 redirect to a server-selected next page or
+validated callback. HTMX responses may use HX-Redirect for full navigation;
+never let submitted URLs select an unchecked redirect. Sensitive responses use
+no-store, and responses varying by HX-Request must vary their cache key.
 
-Use a server-side authenticated-flow stage; the browser cannot select a user ID.
-Navigation preserves the binding, including login/register transitions. Success
-returns an internal next-step or validated redirect URL; never app tokens.
-Direct and hosted credential login/registration set the shared eight-hour Crow
-browser session cookie. Direct portal success redirects to /account; app flows
-continue through consent to their callback. Reusing SSO never extends the browser
-session deadline or changes auth_time. GET /api/portal/account reads this session;
-POST /api/portal/logout invalidates it with CSRF/Origin checks, ending browser SSO
-but leaving existing app sessions/families intact. Secure, HttpOnly, host-only cookies, framing protection, request bounds,
-credential-free logs and generic login failures follow Architecture. Registration
-discloses unavailable recovery. No application-facing password grant exists.
+GET /login without a bound app flow is portal login; /oauth/authorize starts app
+flows and routes to hosted UI. GET /register preserves a validated flow.
+Expired/invalid app flows require restart, never a fallback to portal login.
+
+Proposed handlers:
+
+- POST /api/hosted/login and /api/hosted/register: username/password plus CSRF
+  and an optional bound flow; enforce [Product account rules](PRODUCT.md#accounts).
+- POST /api/hosted/consent: approve/deny an authenticated pending flow.
+- GET /api/portal/account: render the signed-in user's own account.
+- POST /api/portal/logout: revoke the browser session and clear its cookie.
+
+Direct credential success continues to /account; app flows continue to consent
+or callback. Both establish the Crow browser session under Product's rules.
+Never return app tokens to browser handlers. Flow state and identity binding
+follow [Architecture](ARCHITECTURE.md#authorization-state-machine).
 
 ## Developer management proposals
 
@@ -221,7 +249,7 @@ Rust owns signing and session operations; PostgreSQL is authoritative. Finalize
 transaction isolation, lock order, uniqueness constraints and restore invalidation.
 Keep portal errors separate from OAuth token/authorization and Bearer resource
 errors. Publish a standard OIDC client walkthrough covering discovery, state,
-nonce, PKCE, ID-token verification, UserInfo and serialized refresh. Run applicable
+nonce, PKCE, ID-token verification, UserInfo and the selected refresh coordination policy. Run applicable
 protocol/conformance tests and cross-client/token-substitution tests before claiming
-compatibility. Dynamic registration, upstream Google/Discord login, public
+compatibility. Completion evidence belongs in [Implementation](IMPLEMENTATION.md). Dynamic registration, upstream Google/Discord login, public
 browser clients and OIDC logout are deferred; do not advertise them in discovery.

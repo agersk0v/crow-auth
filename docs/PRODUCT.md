@@ -1,20 +1,23 @@
 # Crow Auth product
 
 Crow Auth is a shared identity provider for first-party and external developers'
-apps. One Crow account works across apps. Apps use Crow-hosted login through
+apps. One Crow account works across apps. Crow implements its own identity-provider
+engine using maintained protocol and cryptographic libraries. Apps use Crow-hosted login through
 OAuth 2.0 Authorization Code Flow with PKCE S256 and OpenID Connect (OIDC).
 Every integrating app initially needs a backend that can keep a client secret.
 
 All behavior here is planned. [README](../README.md) owns runnable status and setup;
 this document owns product behavior and lifetimes;
-[Architecture](ARCHITECTURE.md) owns security enforcement and implementation checks;
+[Architecture](ARCHITECTURE.md) owns security enforcement;
+[Implementation](IMPLEMENTATION.md) owns completion evidence;
 [API contract](API_CONTRACT.md) owns protocol details and proposed internal APIs.
 OAuth/OIDC compatibility is a target, not an implemented or certified feature.
 
 ## Accounts
 
-Crow owns an immutable shared user UUID, username, password hash and subscription
-status. Apps associate their own business data with the Crow UUID. Shared identity
+Crow owns an immutable internal user UUID, username, password hash and subscription
+status. Each app receives a stable pairwise opaque subject for its sector and associates its own
+business data with that subject; the internal UUID is not exposed to integrating apps. Shared identity
 gives no access to another app's data or developer configuration. No email address
 is required initially.
 
@@ -33,12 +36,9 @@ address changes, single-use expiring reset links, abuse protection, generic rese
 responses and session invalidation after reset. Never trust an unverified address
 or silently attach one during a forgotten-password request.
 
-Initially every app receives the same public user UUID. This makes shared identity
-simple, but unrelated developers can correlate a user if they compare identifiers.
-It does not grant access to each other's data. Keep this initial choice explicit;
-review it before onboarding unrelated external developers. Pairwise OIDC subjects
-(a different stable identifier per app/sector) are the alternative and would require
-an identifier-migration plan. Do not change subject semantics during implementation.
+Expose pairwise opaque OIDC subjects: the same account receives a different stable
+`sub` for each sector. Apps in the same sector share a subject. Subjects must not reveal or permit derivation of the
+internal UUID. Do not use usernames or email addresses as subjects. The API contract defines sectors; Architecture owns subject mapping and storage.
 
 ## Login and consent
 
@@ -49,7 +49,7 @@ an identifier-migration plan. Do not change subject semantics during implementat
    the flow. Crow obtains required
    consent and returns a single-use code and original state to the exact callback.
 4. The backend checks state, exchanges the code at `/oauth/token`, validates the
-   ID token and uses its `sub` as the Crow UUID for its local account/session.
+   ID token and uses its `sub` as the app-specific identity for its local account/session.
 5. Access tokens authorize Crow APIs; refresh tokens extend the app session
    when offline access was granted. ID tokens never authorize API requests.
 
@@ -79,7 +79,7 @@ and state only to a validated callback. A newly registered account remains creat
 
 | Scope | Permission |
 | --- | --- |
-| `openid` | Sign in and receive the shared UUID as `sub` |
+| `openid` | Sign in and receive a pairwise opaque subject as `sub` |
 | `profile` | Receive username as `preferred_username` |
 | `crow.subscription` | Read the current user's subscription status |
 | `offline_access` | Receive rotating refresh tokens after explicit consent |
@@ -93,7 +93,7 @@ Google/Discord login options are separate future integrations.
 | --- | --- | --- |
 | Visitor | Register and begin hosted login | No private data or app management |
 | Backend with client credentials and code/PKCE | Exchange its own authorization code | Client credentials alone grant no user access |
-| Backend with user access token | Read UserInfo and subscription as scopes permit | Verify Crow resource audience, issuing app and scopes; derive user from `sub` |
+| Backend with user access token | Read UserInfo and subscription as scopes permit | Crow verifies resource audience, issuing app and scopes, then resolves the subject |
 | Backend with client credentials and refresh token | Refresh or revoke its family | Bound to that user, client and family |
 | User with portal session | View account, register and manage owned apps | Check ownership on every management operation |
 
@@ -105,13 +105,14 @@ Subscription status is read-only to users/apps; no public API grants it.
 
 Direct login/registration creates the shared Crow browser session and goes to
 /account. Hosted app login creates that session but continues to the app callback.
-Protected pages require login. Next.js serves these pages:
+Protected pages require login. Axum renders templates with HTMX enhancements
+for these pages:
 
 | Page | Purpose |
 | --- | --- |
 | `/login` | Portal login or hosted UI for a validated app flow |
 | `/register` | Create an account, preserving any bound app flow |
-| `/account` | UUID, username, subscription status and portal logout |
+| `/account` | Internal UUID, username, subscription status and portal logout |
 | `/applications` | List owned apps and register an app |
 | `/applications/{id}` | Manage name, callbacks, client secrets and enabled state |
 
@@ -145,9 +146,10 @@ an app's own APIs under the initial Crow resource-token contract.
 | Authorization code | 60 seconds after issuance |
 
 Backends retain tokens in protected server storage; browsers receive a random
-app-session cookie handle. Refreshes must be serialized across backend instances.
-Rotation consumes the old refresh token. Reuse revokes the entire family,
-including accidental duplicates; no grace window or response replay exists.
+app-session cookie handle. Refresh tokens rotate. Duplicate/retry handling is
+unresolved; strict family revocation on every duplicate is not an accepted rule.
+Resolve the replacement policy before implementing refresh, including concurrency,
+theft detection and lost responses. Architecture owns that decision gate.
 
 App logout revokes its current refresh family and clears local state. Other apps
 and devices remain signed in. Portal logout invalidates the current Crow browser
@@ -159,11 +161,8 @@ access there is no refresh family; local app-session expiry must be bounded and
 requires fresh authorization when new Crow tokens are needed. ID-token expiry
 alone does not define an app's local session duration.
 
-PostgreSQL stores all account/session state. Exchange consumes the code and,
-when applicable, creates its family transactionally. Tokens are returned only
-after confirmed commit. Unavailable storage grants no tokens. Uncertain commit
-outcomes or lost successful exchange/refresh responses require fresh authorization;
-never blindly retry. Missing refresh records require login.
+Storage and transaction failure guarantees are defined in
+[Architecture](ARCHITECTURE.md#transactions-and-failures).
 
 ## Subscriptions and deferred scope
 
@@ -189,5 +188,5 @@ contracts before exposure. Clerk/Google feature parity is not a requirement.
 5. Refresh, revocation, disablement and subscription reads.
 6. Integration/conformance checks and deployment hardening.
 
-Use [Architecture's acceptance checks](ARCHITECTURE.md#first-milestone-acceptance-checks)
-throughout implementation; security controls belong with each feature.
+[Implementation milestones](IMPLEMENTATION.md) define completion evidence.
+Security controls belong with each feature, not in a final hardening pass.

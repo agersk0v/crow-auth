@@ -5,12 +5,13 @@ docs/ARCHITECTURE.md for security enforcement and docs/API_CONTRACT.md for proto
 details. docs/IMPLEMENTATION.md tracks bounded milestones. Planned is not implemented.
 
 - Standards requirements are mandatory. Each document owns the subject above.
-  Flag conflicting requirements; do not silently choose or invent behavior.
+  Flag conflicting requirements with both sources and a recommended resolution;
+  continue independent work. Do not silently choose or invent behavior.
 - Implement the requested milestone only. Deferred features are not implicitly
   authorized work. Resolve feature-blocking design questions before coding.
 - Keep HTTP parsing/responses, domain rules and persistence separate as they grow;
   avoid creating empty layers or extra services in advance.
-- Update affected contracts and acceptance checks with behavior changes. Keep each
+- Update affected contracts and milestone evidence with behavior changes. Keep each
   rule authoritative in one place and link to it elsewhere.
 - Add meaningful verification for security behavior, persistence and races. Never
   mark a milestone verified merely because code compiles or unit tests pass.
