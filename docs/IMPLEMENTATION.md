@@ -3,7 +3,8 @@
 ## Status and readiness
 
 Documentation defines **Accepted planned behavior**, not shipped functionality.
-Reviewed baseline: commit `6fb1518`. `src/main.rs` connects a five-connection SQLx
+Implementation reviewed at `6fb1518`; reconciled with documentation baseline
+`64e9684` on main, which has the same application code. `src/main.rs` connects a five-connection SQLx
 PostgreSQL pool, runs SELECT 1 and exposes only GET /health on 127.0.0.1:3000.
 `tests/startup.rs` checks missing/invalid database configuration and credential
 redaction. Cargo dependencies are Axum, Tokio and SQLx. No migrations, account
@@ -14,12 +15,17 @@ The first milestone is the entire verified-account/two-backend-app experience,
 including recovery, deletion and negative cases. It is ready for implementation
 against the contracts below, not ready for use or deployment. No product/protocol
 blocking decisions remain; deployment measurements and actual verification remain.
-Document ownership and decision labels follow [AGENTS.md](../AGENTS.md).
+[Product](PRODUCT.md) owns milestone behavior, [Architecture](ARCHITECTURE.md) owns
+security enforcement, and [API contract](API_CONTRACT.md) owns protocol details.
+This document owns build order and evidence. **Accepted** means chosen planned
+behavior; **Unresolved** marks a future decision; **Deferred** is outside this
+milestone. None implies implementation. Follow [AGENTS.md](../AGENTS.md) for checks.
 
 ## Review findings and resolved decisions
 
 | Baseline gap/conflict | Resolution and authoritative source |
 | --- | --- |
+| Main simplified documentation and removed the old docs directory | Preserve root overviews and contributor guidance; link them to this requested detailed milestone specification |
 | Product said no email and deferred recovery/deletion; requested milestone requires all three | Mandatory verified email, recovery/change and deletion included; [Accounts](PRODUCT.md#accounts). User confirmed verification and owned-app deletion policy |
 | API said no account deletion; management/browser routes merely proposed | Accepted form contracts, including lifecycle; [API](API_CONTRACT.md#account-lifecycle-browser-contracts) |
 | Registration was treated as authenticated login | Pending registration creates no SSO; verification then password login required; [Accounts](PRODUCT.md#accounts) |

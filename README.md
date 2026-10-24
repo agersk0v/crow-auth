@@ -1,71 +1,32 @@
-# crow-auth
+# Crow Auth
 
-Rust HTTP service using Axum and Tokio. Authentication is not implemented yet.
+A small identity provider for adding **Sign in with Crow** to independent apps
+using OpenID Connect.
 
-## Design documents
+The current implementation is a Rust HTTP skeleton with PostgreSQL connectivity
+and a health endpoint. Authentication is not implemented yet.
 
-Crow Auth is a planned OAuth 2.0/OpenID Connect identity provider and subscription
-service with hosted login, browser SSO and backend-only app integrations.
+## Run locally
 
-- [Product behavior](docs/PRODUCT.md)
-- [Architecture and security](docs/ARCHITECTURE.md)
-- [Milestone API contract](docs/API_CONTRACT.md)
-- [Readiness, ordered implementation checklist and acceptance tests](docs/IMPLEMENTATION.md)
-- [AI contributor instructions](AGENTS.md)
-
-The design documents describe planned behavior; the runnable implementation is
-the skeleton below. See [AGENTS.md](AGENTS.md) for document ownership and decision labels.
-
-## First authentication milestone (planned)
-
-Register and verify a Crow account, sign into backend app A, then sign into
-backend app B through the same Crow browser session without entering credentials
-again. The specification includes consent, recovery, password changes, account
-deletion, owned client management and explicit logout/failure behavior. It excludes
-refresh tokens, billing and global app logout. None of these auth features is
-implemented yet. The [implementation document](docs/IMPLEMENTATION.md) records the
-source review, resolved decisions, limitations, acceptance fixture and build order.
-
-## Development
-
-Install a stable Rust toolchain and PostgreSQL (or Docker). To start a local database (Bash):
-
-```sh
-read -rsp 'Local PostgreSQL password: ' POSTGRES_PASSWORD; echo
-export POSTGRES_PASSWORD
-docker run --name crow-auth-postgres --rm -d \
-  -e POSTGRES_USER=crow_auth -e POSTGRES_PASSWORD -e POSTGRES_DB=crow_auth \
-  -p 127.0.0.1:5432:5432 postgres:17
-docker exec crow-auth-postgres pg_isready -U crow_auth -d crow_auth
-unset POSTGRES_PASSWORD
-```
-
-Wait until `pg_isready` reports that the database accepts connections. Set
-`DATABASE_URL` in your shell using your local credentials (URL-encode special
-characters in the username and password). This is a placeholder, not a working credential:
-
-```sh
-export DATABASE_URL='postgres://<user>:<url-encoded-password>@127.0.0.1:5432/crow_auth'
-```
-
-Then run:
+With stable Rust supporting edition 2024 and a running PostgreSQL database, set
+`DATABASE_URL` to your local connection string, then run:
 
 ```sh
 cargo run --locked
 ```
 
 The server listens on `127.0.0.1:3000`. `GET /health` returns `ok`.
-At startup it connects a SQLx PostgreSQL pool, runs `SELECT 1`, and stores the pool
-in Axum application state. Missing configuration or an unavailable database stops
-startup with an error that does not include credentials. `/health` is a basic HTTP
-liveness endpoint; it does not check ongoing database health.
 
-```sh
-cargo check --locked
-cargo test --locked
-curl --fail http://127.0.0.1:3000/health
-```
+## Documentation
 
-Stop the local database with `docker stop crow-auth-postgres`. This disposable
-container does not retain data after removal. User tables and authentication
-flows are not included yet.
+- [Product](PRODUCT.md): purpose and basic scope.
+- [Architecture](ARCHITECTURE.md): technical structure.
+- [First milestone specification](docs/PRODUCT.md): account lifecycle, SSO and app management.
+- [Security design](docs/ARCHITECTURE.md): sessions, persistence and enforcement.
+- [OIDC and browser contracts](docs/API_CONTRACT.md): endpoints and validation.
+- [Implementation and acceptance](docs/IMPLEMENTATION.md): build order, readiness and two-app scenario.
+- [Agent guidance](AGENTS.md): working in this repository.
+
+The first milestone requires a verified account to sign into two backend apps
+through one Crow browser session without a second credential prompt. Recovery,
+deletion, app ownership and failure cases are specified; all remain planned.

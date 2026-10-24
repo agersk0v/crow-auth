@@ -2,8 +2,9 @@
 
 ## Status and authority
 
-**Accepted:** planned security requirements unless labeled otherwise. See
-[AGENTS.md](../AGENTS.md) for document ownership and decision labels.
+This document owns milestone security enforcement. **Accepted** means chosen
+planned behavior; **Unresolved** marks a future decision; **Deferred** is outside
+this milestone. None implies implementation.
 
 Before protocol implementation, evaluate library coverage and document which
 security responsibilities remain Crow's.

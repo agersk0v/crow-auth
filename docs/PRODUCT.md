@@ -6,8 +6,8 @@ engine using maintained protocol and cryptographic libraries. Apps use Crow-host
 OAuth 2.0 Authorization Code Flow with PKCE S256 and OpenID Connect (OIDC).
 Every integrating app initially needs a backend that can keep a client secret.
 
-**Accepted:** planned product behavior unless labeled otherwise. See
-[AGENTS.md](../AGENTS.md) for document ownership and decision labels.
+This document owns milestone product behavior. **Accepted** means chosen planned
+behavior; **Deferred** is outside this milestone. Neither implies implementation.
 
 ## Accounts
 

@@ -2,9 +2,9 @@
 
 ## Status
 
-**Accepted:** planned protocol choices unless labeled otherwise. Internal browser
-and management endpoint shapes are **Accepted** planned contracts. See [AGENTS.md](../AGENTS.md)
-for document ownership and decision labels.
+This document owns milestone endpoint and protocol details, including browser
+and management handlers. **Accepted** means chosen planned behavior; **Deferred**
+is outside this milestone. Neither implies implementation.
 
 Follow OIDC Core, OAuth 2.0 security best practice (RFC 9700), PKCE (RFC 7636),
 discovery, Bearer token usage and RFC 7009 revocation for supported features.
