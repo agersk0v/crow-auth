@@ -119,12 +119,15 @@ There is no shared transaction across these stores. Proposed success:
 {"access_token":"<JWT>","token_type":"Bearer","expires_in":600,"refresh_token":"<opaque-token>"}
 ```
 
-Before implementation, choose the exchange failure policy described in
-Architecture: consume-once and restart authorization after subsequent failure,
-or durable coordination with bounded internal retries. Do not promise retry of
-a consumed code until that policy is defined. Concurrent requests cannot create
-multiple usable families. A lost public success response requires new
-authorization. Define ambiguous writes and orphan cleanup explicitly.
+Confirmed policy: consume once, then restart authorization after failure.
+Atomically consume the code and confirm PostgreSQL commit before creating its
+Redis session. Only the winning consumer proceeds. A 503 after consumption or
+an uncertain write requires a fresh hosted login; do not retry that code or
+restore it. Retry within the original lifetime is allowed only when
+non-consumption is confirmed. Concurrent requests cannot create multiple usable
+families. A lost public success response also requires new authorization.
+Best-effort revoke known orphan families; expiry bounds leftovers if cleanup
+fails. Define signing order and cleanup details before implementation.
 
 ### Refresh: POST /api/token/refresh
 
@@ -211,13 +214,14 @@ and invalidation mechanism before implementation; cleanup alone is insufficient.
 Rust owns exchange, refresh, revocation and all JWT signing. PostgreSQL stores
 authorization codes and durable app/account configuration; Redis is authoritative
 for refresh sessions. Go is not required. Validate user/client/family bindings
-server-side. Define cross-store exchange failures, atomic Redis operations,
+server-side. Exchange uses the confirmed consume-once/restart policy. Define
+atomic Redis operations,
 signing failures, ambiguous writes and disablement enforcement before implementation.
 
 ## Review and validation
 
 Before endpoint implementation, review proposed headers, paths, error mapping and
-cross-store exchange policy and session-failure behavior. Before deployment, choose numeric rate limits,
+exchange locking/signing order, orphan cleanup and session-failure behavior. Before deployment, choose numeric rate limits,
 request sizes, proxy trust, password dataset/costs, CSRF mechanics, cookie names,
 Redis persistence/capacity/restore invalidation, PostgreSQL recovery and JWKS cache settings.
 Use Architecture's first-milestone acceptance checks as behavioral verification.
