@@ -4,14 +4,18 @@ Rust HTTP service using Axum and Tokio. Authentication is not implemented yet.
 
 ## Design documents
 
-Crow Auth is a planned OAuth 2.0/OpenID Connect identity provider and subscription
-service with hosted login, browser SSO and backend-only app integrations.
+Crow Auth is a planned shared-account OAuth 2.0/OpenID Connect identity provider with hosted login, browser SSO and backend-only app integrations.
 
 - [Product behavior](docs/PRODUCT.md)
 - [Architecture and security](docs/ARCHITECTURE.md)
 - [Draft API contract](docs/API_CONTRACT.md)
 - [Implementation milestones](docs/IMPLEMENTATION.md)
 - [AI contributor instructions](AGENTS.md)
+
+The first release covers registration, sign-in, email verification, recovery,
+account deletion, shared browser sign-in and app management. Its first integration
+milestone is one user signing into two backend example apps with one credential
+entry. See [milestone acceptance criteria](docs/IMPLEMENTATION.md#first-integration-milestone-two-example-apps).
 
 The design documents describe planned behavior; the runnable implementation is
 the skeleton below. See [AGENTS.md](AGENTS.md) for document ownership and decision labels.

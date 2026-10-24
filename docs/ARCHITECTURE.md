@@ -60,6 +60,24 @@ credentials based on the previous password/security state. Define the account
 locking or security-version mechanism before implementation. Failure rolls back
 both the password update and invalidation; return success only after confirmed commit.
 
+## Email lifecycle and deletion
+
+Enforce Product's verified-account gate in both authorization completion and
+management handlers; hiding UI is insufficient. Use high-entropy verification
+and reset credentials, store only verifiers, bind them to account, purpose and
+address/security version, and consume them atomically with the state change.
+Verification must not extend an expired hosted flow. Never log email link credentials.
+Define delivery retries and failure handling so failed delivery cannot mark an
+address verified. Rate-limit issuance and attempts; use generic recovery responses.
+
+Serialize account deletion with login, authorization completion, exchange and app
+management. Once deletion commits, no concurrent operation may create usable
+account sessions or grants. Record revocation/disablement durably before returning
+success; purge later under Product's accepted retention policy. Restores must
+reapply deletion suppression before serving traffic. External app sessions remain
+outside Crow's control. Exact schema, lock order, email token policy and deletion
+retention are decision gates, not implemented mechanisms.
+
 ## Browser security and sessions
 
 Application backends store tokens server-side; their browsers receive random

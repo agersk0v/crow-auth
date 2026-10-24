@@ -225,8 +225,11 @@ Expired/invalid app flows require restart, never a fallback to portal login.
 - GET /api/portal/account: render the signed-in user's own account.
 - POST /api/portal/logout: revoke the browser session and clear its cookie.
 
-Direct credential success continues to /account; app flows continue to consent
-or callback. Both establish the Crow browser session under Product's rules.
+Registration continues to email verification before app authorization or developer
+management is permitted. Define verification/resend/recovery/reset/deletion handlers,
+token rules and failure responses before implementing these account features.
+Direct credential success for a verified account continues to /account; app flows
+continue to consent or callback. Both establish the Crow browser session under Product's rules.
 Never return app tokens to browser handlers. Flow state and identity binding
 follow [Architecture](ARCHITECTURE.md#authorization-state-machine).
 
@@ -250,8 +253,10 @@ no method override or JavaScript is required. Apply the browser response rules a
 | POST /api/portal/applications/{id}/disable | Block app operations and permanently revoke existing grants and refresh families |
 | POST /api/portal/applications/{id}/enable | Re-enable configuration; never restore revoked grants or families |
 
-No permanent app deletion, account editing/deletion or billing mutations in this
-milestone. Disabled apps can still be managed by their owner. Specify atomic
+Permanent app deletion, general profile editing and billing mutations are deferred.
+Account verification, recovery and deletion are required for the first release;
+their internal handler contracts must be accepted before implementation. Disabled
+apps can still be managed by their owner. Specify atomic
 callback changes versus in-flight flows before implementation; a removed callback
 must not be used for a later redirect/exchange. Durable disablement must remain
 effective through PostgreSQL state checks and transaction locking coordinated
