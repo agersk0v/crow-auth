@@ -29,8 +29,17 @@ during the prototype, but must be designed and implemented before public product
 use. Initially no email is collected and recovery remains unavailable. Before recovery
 launch, define verified email enrollment for existing and new accounts, secure
 address changes, single-use expiring reset links, abuse protection, generic reset
-responses and session invalidation after reset. Never trust an unverified address
+responses and the password-replacement invalidation rules below. Never trust an unverified address
 or silently attach one during a forgotten-password request.
+
+Before public production, support authenticated password changes as well as
+verified-email recovery. A change requires fresh verification of the current
+password; a reset requires a valid single-use recovery credential. Apply the same
+password policy to both. Successful replacement invalidates all Crow browser
+sessions, unfinished authenticated flows, outstanding authorization codes, grants
+and refresh families for the account. Require a new login, including for the
+requesting browser. Existing app-local sessions cannot be remotely cleared under
+the initial integration contract. Define endpoint/UI shapes before implementation.
 
 Subjects must not reveal or permit derivation of the internal UUID; usernames and
 email addresses are not subjects. The [API contract](API_CONTRACT.md#pairwise-subject-sectors)
@@ -128,9 +137,10 @@ creation date. Rotation overlaps until explicit revocation. Revoking a secret
 does not itself revoke user sessions, but subsequent authenticated requests need
 a valid secret. Owners can disable/re-enable apps; permanent deletion is deferred.
 Disablement blocks new authorization, exchange, refresh and app-token Crow API
-access and revokes existing refresh families. Re-enabling never restores them.
-Previously issued access tokens expire naturally; they are not credentials for
-an app's own APIs under the initial Crow resource-token contract.
+access and permanently revokes existing grants and refresh families. Re-enabling
+never restores them; old access tokens remain unusable at Crow APIs even before
+expiry. These tokens are not credentials for an app's own APIs under the initial
+Crow resource-token contract. Existing app-local sessions are not remotely cleared.
 
 ## Sessions and failure behavior
 
@@ -172,10 +182,11 @@ Before billing implementation, define purchaser/customer ownership, eligible
 states, plans/prices/trials, interfaces, refunds, payment recovery, lifecycle
 precedence, webhook idempotency and reconciliation. Billing does not block auth.
 
-**Deferred:** external/social/passwordless login, MFA, email recovery, profile/password changes,
+**Deferred:** external/social/passwordless login, MFA, profile changes,
 account deletion, organizations/teams, app business roles, paid feature gating,
 embedded components and a broad admin dashboard are deferred. Define their
-contracts before exposure. Clerk/Google feature parity is not a requirement.
+contracts before exposure. Password recovery and password changes are required
+before public production as specified above. Clerk/Google feature parity is not a requirement.
 
 ## Implementation
 

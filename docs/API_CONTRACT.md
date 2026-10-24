@@ -159,7 +159,13 @@ For ID tokens, validate signature, explicit RS256 allowlist, known key, exact co
 claim types, expiry and issuance time with 30 seconds clock tolerance.
 ID tokens cannot authorize resource APIs.
 Clients validate ID-token client audience and nonce against the initiating
-browser session, after validating state at the callback. Compare UserInfo sub to
+browser session, after validating state at the callback. Store requested max_age
+with that initiating session. When max_age was requested, require a numeric auth_time,
+reject future values beyond the 30-second clock tolerance, and, for positive max_age, verify authentication
+age against the requested max_age with that tolerance. For max_age=0, verify fresh
+authentication against the initiating request time (allowing clock tolerance),
+rather than requiring zero elapsed time at token receipt. Reject missing, malformed
+or stale auth_time. Compare UserInfo sub to
 the ID-token sub. Key provisioning and rotation belong to
 [Architecture](ARCHITECTURE.md#token-signing-and-keys).
 
@@ -230,17 +236,19 @@ follow [Architecture](ARCHITECTURE.md#authorization-state-machine).
 
 All routes require portal session; mutations additionally require CSRF and Origin.
 Ownership comes from stored owner UUID, never supplied request owner IDs.
+Browser mutations use POST action routes accepting ordinary form submissions;
+no method override or JavaScript is required. Apply the browser response rules above.
 
 | Method and path | Request / result |
 | --- | --- |
 | GET /api/portal/applications | List only owned app summaries |
 | POST /api/portal/applications | name and redirect_uris; create owned app and initial secret, displayed once |
 | GET /api/portal/applications/{id} | Own configuration and secret metadata; no retrievable secret |
-| PATCH /api/portal/applications/{id} | name and/or redirect_uris; validate full callback policy |
+| POST /api/portal/applications/{id}/update | name and/or redirect_uris; validate full callback policy |
 | POST /api/portal/applications/{id}/secrets | Create second secret if fewer than two active; return ID, created_at and plaintext once |
-| DELETE /api/portal/applications/{id}/secrets/{secret_id} | Revoke owned app's secret; do not revoke user families |
-| POST /api/portal/applications/{id}/disable | Block all supported app operations and revoke refresh families |
-| POST /api/portal/applications/{id}/enable | Re-enable configuration; never restore revoked families |
+| POST /api/portal/applications/{id}/secrets/{secret_id}/revoke | Revoke owned app's secret; do not revoke user families |
+| POST /api/portal/applications/{id}/disable | Block app operations and permanently revoke existing grants and refresh families |
+| POST /api/portal/applications/{id}/enable | Re-enable configuration; never restore revoked grants or families |
 
 No permanent app deletion, account editing/deletion or billing mutations in this
 milestone. Disabled apps can still be managed by their owner. Specify atomic
@@ -253,7 +261,9 @@ with exchange and refresh; cleanup alone is insufficient.
 
 Keep portal errors separate from OAuth token/authorization and Bearer resource
 errors. Publish a standard OIDC client walkthrough covering discovery, state,
-nonce, PKCE, ID-token verification and UserInfo. Extend the walkthrough with the
+nonce, PKCE, ID-token verification (including max_age/auth_time checks) and UserInfo.
+Cover missing, malformed, stale and future auth_time and max_age=0 in the reference
+integration's verification scenarios. Extend the walkthrough with the
 selected refresh coordination policy when that milestone is implemented. Run applicable
 protocol/conformance tests and cross-client/token-substitution tests before claiming
 compatibility. Completion evidence belongs in [Implementation](IMPLEMENTATION.md). Dynamic registration, upstream Google/Discord login, public

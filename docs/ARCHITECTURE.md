@@ -52,6 +52,14 @@ display, active-secret limits and rotation behavior. Never log passwords, tokens
 authorization headers, client secrets, signing keys, database credentials or
 sensitive callback queries.
 
+Password replacement must atomically update the hash and invalidate account
+sessions, authenticated flows, codes, grants and refresh families as required by
+[Product](PRODUCT.md#accounts). Serialize it with authentication, authorization
+completion, exchange and refresh so concurrent operations cannot commit usable
+credentials based on the previous password/security state. Define the account
+locking or security-version mechanism before implementation. Failure rolls back
+both the password update and invalidation; return success only after confirmed commit.
+
 ## Browser security and sessions
 
 Application backends store tokens server-side; their browsers receive random
@@ -127,6 +135,12 @@ revoked. Invalid bindings must not revoke another grant. Resource APIs check gra
 state until token expiry. App-local sessions cannot be remotely cleared this way.
 The access-token record links directly to its stored grant.
 
+App disablement atomically marks the app disabled and permanently revokes its
+existing grants and refresh families. Serialize it with authorization completion,
+exchange and refresh through durable app state and consistent transaction locking.
+Re-enabling permits new authorizations but never clears those revocations; old
+access tokens remain rejected. Cleanup is not the enforcement mechanism.
+
 ## Token signing and keys
 
 [API contract](API_CONTRACT.md#token-claims-and-validation) owns ID-token claims
@@ -162,7 +176,8 @@ the existing verifier-only model cannot reconstruct a returned refresh token.
 Provide a reference backend covering concurrent requests and failures.
 
 Coordinate refresh and disablement through durable app state and transaction
-locking. Disablement revokes families; re-enabling never restores them.
+locking. Follow the permanent grant/family revocation rules in
+[Transactions and failures](#transactions-and-failures).
 Missing, expired or revoked state grants no tokens. Product owns logout effects.
 
 ## Operations and deployment gates
