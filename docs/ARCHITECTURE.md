@@ -14,17 +14,18 @@ not implemented. Wire-level proposals remain subject to implementation review.
   authorization flows, codes, portal sessions, refresh-session creation,
   rotation and revocation, and the public API.
 - PostgreSQL stores durable accounts, application configuration, consent,
-  subscription state, portal sessions, pending authorization flows, codes,
-  refresh families and refresh-token verifiers.
+  subscription state, portal sessions, pending authorization flows and codes.
+- Redis stores application refresh families, refresh-token verifiers,
+  spent-token evidence and revocation state. Rust owns all Redis operations.
 - Rust signs initial and refreshed access JWTs using a securely provisioned
   3072-bit RSA private key and the RS256 token specification.
-- Go and Redis are not required for the initial architecture.
+- Go is not part of the architecture; no separate refresh service is required.
 - Next.js serves hosted login/registration, account and developer pages.
 - Stripe is deferred; billing does not block the authentication milestone.
 
 Pages and `/api` share one public HTTPS origin, routed internally to Next.js and
-Rust. The domain remains undecided. PostgreSQL is private; Rust authenticates
-database connections. There is no separate refresh service or internal
+Rust. The domain remains undecided. PostgreSQL and Redis are private; Rust uses
+authenticated connections, with transport protection appropriate to deployment. There is no separate refresh service or internal
 authentication protocol between signers.
 
 Applications call Rust for exchange, refresh, logout, identity and subscription.
@@ -86,17 +87,17 @@ on exact localhost/127.0.0.1 development hosts; no fragments or wildcards.
 ## Initial exchange and partial failures
 
 Rust validates the client, enabled app state, code bindings, expiry and PKCE.
-Consume the code and create its refresh family and token verifier in one
-PostgreSQL transaction. Lock the relevant records and use database constraints
-so concurrent exchanges cannot consume a code twice or create duplicate families.
-Prepare the signed JWT and response credentials before committing; return tokens
-only after a confirmed commit. Signing failures roll back the transaction.
+Codes live in PostgreSQL; refresh sessions live in Redis. These writes cannot
+share a database transaction. Return tokens only after code consumption is
+confirmed and the refresh session exists. Concurrent exchanges must not create
+multiple usable families for one code.
 
-A rolled-back exchange can be retried within the original code lifetime.
-An uncertain commit outcome or lost public success response requires fresh
-authorization; never assume a timeout means rollback. Do not persist plaintext
-response tokens for replay. Specify transaction isolation, lock ordering, unique
-constraints and cleanup before implementing this flow.
+Decision pending before exchange implementation: choose consume-once with fresh
+authorization after any subsequent failure, or a durable coordinated exchange
+with bounded internal retries. Specify write ordering, signing failure, uncertain
+write outcomes, crash cleanup and orphan-session handling for the chosen policy.
+A lost public success response requires fresh authorization. Never assume a
+timeout proves a write failed or make a successfully exchanged code reusable.
 
 ## JWT contract and key rotation
 
@@ -122,19 +123,18 @@ requires emergency replacement and rejection policy; cached external verificatio
 keys can delay rejection. A compromised Rust signing instance can forge trusted
 tokens. Never commit private keys or bake them into images.
 
-## Refresh, logout and PostgreSQL
+## Refresh, logout and Redis
 
 Refresh tokens are high-entropy opaque credentials. Store verifiers and user,
 client, family ID, creation time, last successful use, original absolute deadline
-and revocation state in PostgreSQL. Retain spent-token evidence until family
-expiry. Rust locks the family and token records and atomically consumes old
-tokens, creates successors and updates idle expiry in one transaction. Commit
-family revocation on reuse even though the request returns invalid_grant;
-do not roll back that revocation with the rejected request.
-Sign the new JWT before commit and return tokens only after a confirmed commit.
-Sessions expire
-seven days idle or thirty days total, whichever comes first. Rotation never
-extends the original thirty-day deadline.
+and revocation state in Redis. Retain spent-token evidence until family expiry.
+Rust uses an atomic Redis operation/script to validate the token and family,
+consume the old token, create its successor and update idle expiry. Reuse
+atomically revokes the family even though the request returns invalid_grant.
+Return tokens only after signing succeeds and the session update is confirmed.
+Specify signing/write ordering and ambiguous failures before implementation.
+Sessions expire seven days idle or thirty days total, whichever comes first.
+Rotation never extends the original thirty-day deadline.
 
 Strict reuse detection revokes the family, including accidental duplicates. No
 grace window. Application backends must serialize refreshes across instances;
@@ -142,17 +142,18 @@ a lost refresh response requires login rather than a blind retry. App logout
 revokes its current family and clears local app state; existing JWTs expire
 naturally. Other applications/devices remain signed in.
 
-Fail closed on unavailable PostgreSQL or failed writes; missing records require
-login. Never reconstruct sessions from unverified tokens. App disablement and
-refresh must coordinate through the same durable app state and transaction
-locking so a concurrent refresh cannot bypass disablement. Disablement revokes
-existing families; re-enabling never restores them. Define lock ordering before
-implementation.
+Fail closed on unavailable Redis or failed writes; missing records require
+login. Never reconstruct sessions from unverified tokens. PostgreSQL remains
+authoritative for app configuration and enabled state. Before implementation,
+choose how refresh checks current app state and how disable/re-enable prevents
+old families from becoming usable again, including concurrent requests and
+failed Redis revocation. Cleanup alone is insufficient.
 
-A known database restore/rollback can resurrect consumed tokens or revoked
-sessions. Define a procedure to invalidate affected refresh and portal sessions
-and outstanding authorization flows/codes before serving traffic from restored
-state. Specify database durability, backup and recovery settings before deployment.
+Before deployment, define Redis persistence, noeviction capacity handling,
+expiration of family/token evidence and restart/restore invalidation. Session
+loss requires login again. Restoring old Redis data must not resurrect consumed
+tokens or revoked families. PostgreSQL portal sessions are separate; database
+restore procedures must also cover portal sessions and pending flows/codes.
 
 ## Operations and remaining work
 
@@ -162,9 +163,10 @@ trusted proxy rules and limiter-outage behavior before public exposure. Keep
 security logs free of credentials and define retention/access policies.
 
 Remaining implementation details: account/session migrations and indexes; exact
-Argon2 costs; password blocklist source; endpoint proposal review; exchange failure
-transaction boundaries, lock ordering and constraints; PostgreSQL durability and
-restore invalidation procedure; disablement races; JWKS cache bounds; consent
+Argon2 costs; password blocklist source; endpoint proposal review; cross-store
+exchange failure policy; atomic Redis rotation; disablement checks and races;
+Redis durability, capacity and restore invalidation; PostgreSQL recovery;
+JWKS cache bounds; consent
 versioning; trusted proxy configuration; numeric limits and deployment secrets.
 Billing still needs customer ownership, eligible states, plans/trials, lifecycle
 precedence, webhook idempotency and reconciliation. No billing writes are exposed.
@@ -175,13 +177,14 @@ precedence, webhook idempotency and reconciliation. No billing writes are expose
   a portal session; direct portal registration/login does create one.
 - Apps cannot collect Crow passwords or use direct password grants.
 - Callback/PKCE/state validation, single-use codes and expiry work under races.
-- Failed or concurrent exchanges issue no tokens before commit or duplicate families.
+- Failed exchanges return no tokens; concurrent exchanges cannot create duplicate usable families.
 - Client credentials alone reveal no user; JWTs cannot authorize portal management.
 - Cross-client audiences, other-user access and non-owner management fail.
 - First-use consent, cancellation and flow expiry have the documented results.
 - Initial and refreshed JWTs share the token contract; key overlap and unknown kid work.
 - Refresh atomicity, strict reuse, idle/absolute expiry and lost responses behave
-  as specified; PostgreSQL failures never grant sessions.
+  as specified; Redis failures never grant sessions and unavailable app-state
+  checks fail closed.
 - Disable/re-enable and secret rotation preserve the documented boundaries.
 - Portal expiry/logout and cookie/CSRF/origin controls work.
 - Subscription is non-subscriber before Stripe; logs contain no credentials.
