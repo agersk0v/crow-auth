@@ -14,7 +14,7 @@ and confirmed security decisions; [README](../README.md) owns working setup and 
 
 Only the Rust/Axum HTTP service, SQLx PostgreSQL connection pool, startup
 `SELECT 1` check, and `GET /health` returning `200 ok` exist. Everything below
-is planned; authentication, frontend, and Stripe are not implemented.
+is planned; authentication, frontend, Redis integration, and Stripe are not implemented.
 
 ## Accounts and connected apps
 
@@ -117,9 +117,11 @@ identity, embedded components, or broad admin dashboard is required.
 
 Rust/Axum owns the account, application, and authentication API, including
 refresh-session creation, rotation, revocation, and signing initial and refreshed
-JWT access tokens. PostgreSQL stores durable account and session state.
-Go and Redis are not part of the initial architecture. JWT access tokens are
-validated cryptographically. See ARCHITECTURE.md for transaction boundaries and
+JWT access tokens. PostgreSQL stores accounts, application configuration,
+consent, portal sessions and authorization flows/codes. Redis stores application
+refresh-session families, token verifiers and reuse-detection state. Go is not
+part of the architecture. JWT access tokens are validated cryptographically.
+See ARCHITECTURE.md for storage boundaries and
 remaining technical decisions. Authentication beyond the existing Rust skeleton
 is planned.
 
@@ -128,7 +130,8 @@ is planned.
 JWT access tokens last 10 minutes and are restricted to their application's
 audience. Refresh sessions expire after 7 days idle or 30 days total, rotate on
 use, and revoke the session family on reuse. Refresh-session state lives in
-PostgreSQL; unavailable storage fails closed.
+Redis; unavailable storage fails closed. Lost refresh-session records require
+login again; recovery must not restore old tokens as usable sessions.
 Normal logout revokes the current refresh session family and clears the local
 session. Existing JWTs expire naturally, within 10 minutes. Other application
 sessions and devices remain signed in. Portal logout clears the current Crow
