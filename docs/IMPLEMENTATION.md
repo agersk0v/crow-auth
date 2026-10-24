@@ -1,16 +1,13 @@
 # Implementation milestones
 
-[README](../README.md) owns runnable status; Product owns scope and lifetimes,
-Architecture owns enforcement, and API contract owns wire behavior.
-The evidence below verifies those requirements; it does not redefine them.
-Planned does not mean implemented, and compilation alone is not verification.
+Build order and completion evidence for the planned design. See
+[AGENTS.md](../AGENTS.md) for document ownership, decision labels and verification rules.
 
 ## Current status
 
 Rust startup, PostgreSQL connectivity and HTTP liveness are implemented.
 Startup tests exist; successful database startup/HTTP smoke verification still
-needs recorded evidence. All authentication milestones below are planned. Decision labels are defined in
-[AGENTS.md](../AGENTS.md); evidence of implementation is separate from acceptance.
+needs recorded evidence. All authentication milestones below are planned.
 
 ## Bounded milestones
 
@@ -34,7 +31,7 @@ status, deadline and the evidence needed to close each gate.
 
 | Decision | Deadline | Completion evidence |
 | --- | --- | --- |
-| **Accepted:** Crow owns its identity-provider engine; use maintained libraries | Before each affected feature | Library responsibility record and scoped dependency approval |
+| **Accepted:** Crow owns its identity-provider engine; use maintained libraries | Before each affected feature | Library responsibility record |
 | **Accepted:** opaque access tokens; signed JWT ID tokens | Before token implementation | Updated contract and durable token/grant validation checks |
 | **Accepted:** first complete OIDC integration excludes refresh/offline access | First integration milestone | Standard client walkthrough; truthful discovery; unsupported-scope checks |
 | **Unresolved:** template library, CSRF issuance and session rotation across tabs | Before browser implementation | Selected mechanics and session/flow race scenarios |

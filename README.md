@@ -5,14 +5,7 @@ Rust HTTP service using Axum and Tokio. Authentication is not implemented yet.
 ## Design documents
 
 Crow Auth is a planned OAuth 2.0/OpenID Connect identity provider and subscription
-service with hosted login and browser SSO,
-backend-only app integrations and a separate account/developer portal.
-Crow implements its own engine. Axum serves templates with HTMX enhancements
-and owns authentication and token signing; apps receive pairwise opaque subjects.
-PostgreSQL stores accounts,
-authorization flows, portal sessions and access-token grants. Access tokens are opaque; ID tokens are signed JWTs.
-The first complete OIDC integration excludes refresh/offline access; refresh
-sessions and transactional rotation belong to a later milestone.
+service with hosted login, browser SSO and backend-only app integrations.
 
 - [Product behavior](docs/PRODUCT.md)
 - [Architecture and security](docs/ARCHITECTURE.md)
@@ -20,9 +13,8 @@ sessions and transactional rotation belong to a later milestone.
 - [Implementation milestones](docs/IMPLEMENTATION.md)
 - [AI contributor instructions](AGENTS.md)
 
-OAuth/OIDC endpoints, discovery and authentication are not implemented yet.
-These describe planned behavior; the runnable implementation remains the skeleton below.
-Decision labels are defined in [AGENTS.md](AGENTS.md).
+The design documents describe planned behavior; the runnable implementation is
+the skeleton below. See [AGENTS.md](AGENTS.md) for document ownership and decision labels.
 
 ## Development
 

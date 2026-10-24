@@ -6,13 +6,8 @@ engine using maintained protocol and cryptographic libraries. Apps use Crow-host
 OAuth 2.0 Authorization Code Flow with PKCE S256 and OpenID Connect (OIDC).
 Every integrating app initially needs a backend that can keep a client secret.
 
-**Accepted:** all behavior here is planned unless labeled otherwise.
-Decision labels are defined in [AGENTS.md](../AGENTS.md). [README](../README.md) owns runnable status and setup;
-this document owns product behavior and lifetimes;
-[Architecture](ARCHITECTURE.md) owns security enforcement;
-[Implementation](IMPLEMENTATION.md) owns completion evidence;
-[API contract](API_CONTRACT.md) owns protocol details and proposed internal APIs.
-OAuth/OIDC compatibility is a target, not an implemented or certified feature.
+**Accepted:** planned product behavior unless labeled otherwise. See
+[AGENTS.md](../AGENTS.md) for document ownership and decision labels.
 
 ## Accounts
 
@@ -182,16 +177,7 @@ account deletion, organizations/teams, app business roles, paid feature gating,
 embedded components and a broad admin dashboard are deferred. Define their
 contracts before exposure. Clerk/Google feature parity is not a requirement.
 
-## Build order
+## Implementation
 
-1. Accounts, migrations and shared Crow browser sessions for portal and SSO.
-2. Owned app registration, callbacks and secret management.
-3. Hosted authorization, registration and consent.
-4. Discovery, code exchange, ID/opaque access tokens and UserInfo; verify a
-   complete integration with a standard OIDC client, without refresh.
-5. Resolve the refresh policy, then implement refresh/revocation and subscription
-   reads. App disablement enforcement accompanies every supported operation.
-6. Extend integration/conformance checks and complete deployment readiness.
-
-[Implementation milestones](IMPLEMENTATION.md) define completion evidence.
-Security controls belong with each feature, not in a final hardening pass.
+[Implementation milestones](IMPLEMENTATION.md) define build order and completion
+evidence. Security controls belong with each feature, not in a final hardening pass.

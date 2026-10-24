@@ -2,16 +2,12 @@
 
 ## Status
 
-[Product](PRODUCT.md) owns behavior and [Architecture](ARCHITECTURE.md) owns
-security enforcement. OAuth 2.0 Authorization Code Flow with PKCE S256 and OIDC
-Core are the chosen initial protocol. This is a planned contract, not implemented
-compatibility or certification. Use OAuth 2.0 security best practice (RFC 9700),
-PKCE (RFC 7636), discovery, Bearer token usage and RFC 7009 revocation.
-Internal browser/management endpoint shapes are proposals; standard wire formats
-follow the cited specifications. **Accepted:** protocol choices below apply to the planned initial integration
-unless labeled **Proposed**, **Unresolved** or **Deferred**. Decision labels are
-defined in [AGENTS.md](../AGENTS.md). Changes must update their owning document and the
-relevant milestone evidence.
+**Accepted:** planned protocol choices unless labeled otherwise. Internal browser
+and management endpoint shapes are **Proposed**. See [AGENTS.md](../AGENTS.md)
+for document ownership and decision labels.
+
+Follow OIDC Core, OAuth 2.0 security best practice (RFC 9700), PKCE (RFC 7636),
+discovery, Bearer token usage and RFC 7009 revocation for supported features.
 
 ## Discovery and public keys
 
@@ -255,8 +251,6 @@ with exchange and refresh; cleanup alone is insufficient.
 
 ## Implementation and validation
 
-Rust owns signing and session operations; PostgreSQL is authoritative. Finalize
-transaction isolation, lock order, uniqueness constraints and restore invalidation.
 Keep portal errors separate from OAuth token/authorization and Bearer resource
 errors. Publish a standard OIDC client walkthrough covering discovery, state,
 nonce, PKCE, ID-token verification and UserInfo. Extend the walkthrough with the

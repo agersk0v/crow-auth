@@ -2,17 +2,11 @@
 
 ## Status and authority
 
-Planned design; [README](../README.md) owns implemented status.
-[Product](PRODUCT.md) owns behavior, scopes and lifetimes;
-[API contract](API_CONTRACT.md) owns protocol details;
-[Implementation](IMPLEMENTATION.md) owns milestones and completion evidence.
-**Accepted:** rules here are planned security requirements unless labeled
-**Proposed**, **Unresolved** or **Deferred** as defined in [AGENTS.md](../AGENTS.md). Standards requirements for the supported protocol are mandatory.
+**Accepted:** planned security requirements unless labeled otherwise. See
+[AGENTS.md](../AGENTS.md) for document ownership and decision labels.
 
-Crow implements its own identity-provider engine. Use maintained protocol,
-password-hashing and cryptographic libraries; do not invent cryptographic
-primitives. Evaluate libraries for the supported features and document which
-security responsibilities remain Crow's before protocol implementation.
+Before protocol implementation, evaluate library coverage and document which
+security responsibilities remain Crow's.
 
 ## Services and trust boundaries
 
