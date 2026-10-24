@@ -35,6 +35,7 @@ authorization rules and local sessions.
 
 | Document | Authority |
 | --- | --- |
+| [Local development](docs/DEVELOPMENT.md) | Run, check and troubleshoot the current skeleton |
 | [Product](docs/PRODUCT.md) | Scope, user journeys and lifecycle behavior |
 | [Architecture](docs/ARCHITECTURE.md) | Storage, trust boundaries and security enforcement |
 | [API contract](docs/API_CONTRACT.md) | Supported protocol and browser routes |
@@ -50,32 +51,21 @@ README and the milestone ledger.
 
 ## Local development
 
-Install stable Rust and a running PostgreSQL instance. Set a local connection
-string in your shell; the following is a placeholder, not a credential:
+Start with the [development guide](docs/DEVELOPMENT.md) for a local PostgreSQL
+container, configuration, smoke checks and troubleshooting. You need current stable Rust with edition 2024 support, PostgreSQL and `curl`; Docker is
+optional if PostgreSQL is already available.
+
+From a checkout with a running local database:
 
 ```sh
 export DATABASE_URL='postgres://<user>:<url-encoded-password>@127.0.0.1:5432/crow_auth'
 cargo run --locked
 ```
 
-URL-encode special characters in database credentials. Do not commit the real
-connection string. A missing or unavailable database stops startup.
+This connection string is a placeholder. Supply your own credentials, URL-encode
+special characters and keep the real value out of source control. In another
+terminal, `curl --fail http://127.0.0.1:3000/health` should return `ok`.
 
-In another terminal:
-
-```sh
-curl --fail http://127.0.0.1:3000/health
-```
-
-For Rust changes:
-
-```sh
-cargo fmt --check
-cargo check --locked
-cargo clippy --locked --all-targets -- -D warnings
-cargo test --locked
-```
-
-Documentation-only changes require link/consistency checks and `git diff --check`.
-Production configuration described in Operations is planned and is not yet
-accepted by the running skeleton.
+For contributor checks, see [verification](AGENTS.md#verification).
+[Production configuration](docs/OPERATIONS.md#configuration-and-release) is
+planned; the running skeleton does not accept those settings yet.
