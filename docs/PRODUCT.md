@@ -5,8 +5,9 @@ implemented functionality, agreed plans, and unresolved decisions. Planned
 features do not exist merely because they are described here.
 
 [README](../README.md) owns implemented setup, configuration, and check commands.
-Detailed technical and security contracts will belong in `docs/ARCHITECTURE.md`
-and `docs/SECURITY.md` when those documents are created.
+Technical design and security rules belong in
+[ARCHITECTURE](ARCHITECTURE.md). Security remains part of that document rather
+than a separate file at this stage.
 
 ## Purpose
 
