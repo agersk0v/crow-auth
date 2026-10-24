@@ -42,10 +42,16 @@ Only confidential web clients are supported; no implicit or password grants.
 
 Validate the complete request before creating a browser-bound 15-minute flow.
 Store nonce, scopes, client, callback, state and challenge server-side. Show
-Crow-hosted login/registration and required consent. A portal session never
-silently authenticates this flow. `prompt=none` returns `login_required`;
-`prompt=login` forces authentication and `prompt=consent` forces consent.
-Support `max_age` with fresh authentication and `auth_time`; reject unsupported
+Crow-hosted login/registration when no usable Crow browser session exists, then
+obtain required consent. A valid session enables SSO with its original auth_time.
+`prompt=login` forces fresh authentication; `prompt=consent` forces consent.
+`prompt=none` must be used alone: return a code without UI only when session,
+freshness and consent requirements are satisfied; otherwise return login_required
+or consent_required to the validated callback. Offline-access grants requiring
+explicit consent cannot complete silently.
+Support nonnegative integer `max_age` in seconds: reauthenticate when the original
+authentication is older; zero always requires fresh authentication. Include the
+actual credential authentication time as `auth_time` in ID tokens. Reject unsupported
 prompt values, combinations and request features with appropriate standard errors.
 Do not advertise request objects, dynamic client registration or other extensions.
 
@@ -109,7 +115,8 @@ OAuth token errors are top-level JSON, for example:
 Use standard errors/statuses: invalid_request, invalid_grant, invalid_scope,
 unauthorized_client, unsupported_grant_type; invalid_client uses HTTP 401 and an
 appropriate WWW-Authenticate challenge for failed Basic authentication. Dependency
-failure returns HTTP 503 with a safe error response and no tokens. A generic 503
+failure returns HTTP 503 with a safe operational error response and no tokens;
+this is an HTTP availability failure, not an additional OAuth token error code. A generic 503
 never proves rollback. An uncertain commit or lost success response requires fresh
 authorization; clients must not blindly retry. Define any explicit safe-retry
 signal before allowing bounded retries after confirmed rollback.
@@ -154,10 +161,12 @@ POST /api/hosted/consent approves/denies an authenticated pending flow.
 Use a server-side authenticated-flow stage; the browser cannot select a user ID.
 Navigation preserves the binding, including login/register transitions. Success
 returns an internal next-step or validated redirect URL; never app tokens.
-Direct portal login/registration sets a separate eight-hour portal cookie and
-redirects to /account. App login never sets that cookie. GET /api/portal/account
-reads the portal session; POST /api/portal/logout invalidates it with CSRF/Origin
-checks. Secure, HttpOnly, host-only cookies, framing protection, request bounds,
+Direct and hosted credential login/registration set the shared eight-hour Crow
+browser session cookie. Direct portal success redirects to /account; app flows
+continue through consent to their callback. Reusing SSO never extends the browser
+session deadline or changes auth_time. GET /api/portal/account reads this session;
+POST /api/portal/logout invalidates it with CSRF/Origin checks, ending browser SSO
+but leaving existing app sessions/families intact. Secure, HttpOnly, host-only cookies, framing protection, request bounds,
 credential-free logs and generic login failures follow Architecture. Registration
 discloses unavailable recovery. No application-facing password grant exists.
 
@@ -192,5 +201,5 @@ Keep portal errors separate from OAuth token/authorization and Bearer resource
 errors. Publish a standard OIDC client walkthrough covering discovery, state,
 nonce, PKCE, ID-token verification, UserInfo and serialized refresh. Run applicable
 protocol/conformance tests and cross-client/token-substitution tests before claiming
-compatibility. Dynamic registration, upstream Google/Discord login, SSO, public
+compatibility. Dynamic registration, upstream Google/Discord login, public
 browser clients and OIDC logout are deferred; do not advertise them in discovery.

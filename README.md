@@ -5,7 +5,7 @@ Rust HTTP service using Axum and Tokio. Authentication is not implemented yet.
 ## Design documents
 
 Crow Auth is a planned OAuth 2.0/OpenID Connect identity provider and subscription
-service with hosted login,
+service with hosted login and browser SSO,
 backend-only app integrations and a separate account/developer portal.
 Rust/Axum owns authentication and token signing; PostgreSQL stores accounts,
 authorization flows, portal sessions and refresh sessions. Refresh rotation and

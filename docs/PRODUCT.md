@@ -1,221 +1,180 @@
-# Crow Auth
+# Crow Auth product
 
-Crow Auth is an API-first identity and subscription service for multiple apps,
-including apps built by external developers. One Crow account works across apps.
-Every integrating application must have a backend; browser-only applications
-are outside the initial scope. All integrating apps use Crow-hosted login and
-registration; users enter their Crow passwords only on Crow pages.
-Clerk and Google sign-in are references, not feature-parity requirements.
+Crow Auth is a shared identity provider for first-party and external developers'
+apps. One Crow account works across apps. Apps use Crow-hosted login through
+OAuth 2.0 Authorization Code Flow with PKCE S256 and OpenID Connect (OIDC).
+Every integrating app initially needs a backend that can keep a client secret.
 
-This document defines agreed product behavior. [ARCHITECTURE.md](ARCHITECTURE.md) records technical
-and confirmed security decisions; [README](../README.md) owns working setup and check commands.
+All behavior here is planned. [README](../README.md) owns runnable status and setup;
+this document owns product behavior and lifetimes;
+[Architecture](ARCHITECTURE.md) owns security enforcement and implementation checks;
+[API contract](API_CONTRACT.md) owns protocol details and proposed internal APIs.
+OAuth/OIDC compatibility is a target, not an implemented or certified feature.
 
-## Current status
+## Accounts
 
-Only the Rust/Axum HTTP service, SQLx PostgreSQL connection pool, startup
-`SELECT 1` check, and `GET /health` returning `200 ok` exist. Everything below
-is planned; authentication, frontend, and Stripe are not implemented.
+Crow owns an immutable shared user UUID, username, password hash and subscription
+status. Apps associate their own business data with the Crow UUID. Shared identity
+gives no access to another app's data or developer configuration. No email address
+is required initially.
 
-## Accounts and connected apps
+Trim username input and lowercase ASCII uppercase letters, then require 3–32
+characters matching `[a-z0-9_]+`. Usernames are unique and initially unchangeable.
+Passwords contain 15–128 Unicode code points; allow spaces, Unicode and paste,
+with no composition rules. Never trim, normalize, lowercase or truncate passwords.
+Reject common/compromised passwords. Password recovery is unavailable and must
+be disclosed during registration.
 
-- Crow owns an immutable shared user UUID, unique username, password hash, and
-  subscription status. No email address is required initially.
-- Apps store their own business data against the Crow UUID. Separate local
-  account registration or passwords are unnecessary; Crow cannot control an
-  external app's database structure.
-- Apps receive the authenticated user's UUID and, with `profile` scope, username. Subscriber status
-  comes from an authenticated subscription API, not a JWT claim. An application backend supplying its user's
-  access token may query the current user's subscription status; the user is
-  derived from the validated token, not a caller-supplied user ID. Sharing identity
-  does not expose another app's data or developer configuration.
-- Any signed-in developer can register an app, without manual approval. Each app
-  has an owner, name, public client ID, and exact registered callback URLs.
-- Only the owner manages the app. Application backends authenticate with a client
-  secret; browser code never receives that secret. Domain verification is not
-  initially required, and registration does not establish app trustworthiness.
+## Login and consent
+
+1. The app backend starts authorization at `/oauth/authorize`, binding state,
+   nonce and PKCE to its initiating browser session.
+2. Crow validates the request and shows hosted login or registration.
+3. A valid Crow browser session, fresh credentials or registration authenticates
+   the flow. Crow obtains required
+   consent and returns a single-use code and original state to the exact callback.
+4. The backend checks state, exchanges the code at `/oauth/token`, validates the
+   ID token and uses its `sub` as the Crow UUID for its local account/session.
+5. Access tokens authorize Crow APIs; refresh tokens extend the app session
+   when offline access was granted. ID tokens never authorize API requests.
+
+Apps must not collect or forward Crow passwords. There is no app-facing password
+grant or registration API. “Continue with Crow” branding is optional.
+
+SSO is included: a valid Crow browser session authenticates new app authorizations
+without another password entry. Direct portal login and hosted app login/registration
+create the same Crow browser session, also used for portal access. App-local sessions
+and refresh families remain separate. Consent is still required as documented below.
+Remembered consent alone never authenticates a user. Invalid or expired app flows
+never silently become portal login.
+
+`prompt=login` and `max_age=0` require fresh authentication. Other `max_age` values
+require it when the original authentication is too old. Reusing a session does not
+reset its authentication time or eight-hour absolute deadline. `prompt=consent`
+forces consent. With `prompt=none`, return a code only if the session, freshness
+and all consent requirements are already satisfied; otherwise return login_required
+or consent_required without displaying UI. Silent requests never create a new
+offline-access grant that requires explicit consent.
+
+Consent shows requested permissions, app name and destination domain without
+implying endorsement. Remember ordinary consent by user, app and permission
+version; ask again when permissions expand. Offline access requires explicit
+consent for each new grant. Decline consumes the flow and returns access_denied
+and state only to a validated callback. A newly registered account remains created.
+
+| Scope | Permission |
+| --- | --- |
+| `openid` | Sign in and receive the shared UUID as `sub` |
+| `profile` | Receive username as `preferred_username` |
+| `crow.subscription` | Read the current user's subscription status |
+| `offline_access` | Receive rotating refresh tokens after explicit consent |
+
+The [API contract](API_CONTRACT.md) defines prompt behavior and supported features.
+Google/Discord login options are separate future integrations.
 
 ## Permissions
 
-Authentication as an application and authentication as a user are separate.
-A client secret identifies an application; it does not grant account-owner or
-developer permissions. All permissions below describe planned behavior.
-
-| Caller | Allowed operations | Boundaries |
+| Caller | Allowed operations | Boundary |
 | --- | --- | --- |
-| Unauthenticated visitor | Create a Crow account and begin login or registration on Crow-hosted pages | Cannot read private account data or manage applications |
-| Application backend authenticated with its client secret | Exchange hosted authorization codes for its own client | Must also supply a valid code with PKCE; the secret alone grants no user access |
-| Application backend supplying a user access token | Access the identity information released to that app and query their own subscription status | Crow verifies the resource audience, issuing client, scopes and token and derives the user from it; no other user's data, portal management, or other app's data |
-| User authenticated with a Crow account/developer session | View their own account, register applications, and manage applications they own through pages or APIs | Ownership is checked on every application operation; no access to another developer's configuration or secrets |
-| Holder of a valid refresh token | Refresh or revoke the corresponding session through the supported protocol | Bound to its user, client, and session family; cannot manage accounts or applications |
+| Visitor | Register and begin hosted login | No private data or app management |
+| Backend with client credentials and code/PKCE | Exchange its own authorization code | Client credentials alone grant no user access |
+| Backend with user access token | Read UserInfo and subscription as scopes permit | Verify Crow resource audience, issuing app and scopes; derive user from `sub` |
+| Backend with client credentials and refresh token | Refresh or revoke its family | Bound to that user, client and family |
+| User with portal session | View account, register and manage owned apps | Check ownership on every management operation |
 
-Application access tokens cannot be used as Crow account/developer sessions.
-Account creation grants no access to existing accounts. Subscription status is
-read-only for users and integrating applications. Public APIs do not allow
-callers to assign themselves subscriber status. Profile edits, password changes,
-account deletion, and billing mutations need explicit contracts before exposure.
-Browser code never receives client secrets. Detailed endpoint contracts must
-specify the required caller credentials and authorization checks.
+App access and ID tokens cannot manage the portal. UserInfo and subscription
+accept access tokens, never ID tokens, and reject disabled issuing apps.
+Subscription status is read-only to users/apps; no public API grants it.
 
-## Login flows
+## Portal and developer apps
 
-### Crow account login
-
-Open `/login` without application parameters, enter username/password, and reach
-`/account`. The account/developer session lasts up to 8 hours. A signed-out visit
-to a protected Crow page requires login.
-
-### Hosted application login
-
-1. The app opens `/oauth/authorize` with `response_type=code`, its client ID,
-   registered callback, state, nonce, requested scopes including `openid`, and
-   a PKCE S256 challenge.
-2. Crow validates the app/callback and shows login or registration.
-3. The user enters credentials or completes registration and approves any required
-   consent; Crow redirects to the registered callback with
-   a short-lived, single-use authorization code and state, never tokens.
-4. The application backend validates state and exchanges the code using its
-   PKCE verifier and client secret at `/oauth/token`. Crow returns an access
-   token and OIDC ID token, plus a refresh token when `offline_access` is granted.
-5. The backend validates the ID token, including issuer, audience and nonce,
-   and uses its `sub` (the shared Crow UUID) to load its own data. Access tokens
-   authorize Crow resource APIs; ID tokens never authorize API requests.
-
-Invalid or incomplete application parameters produce an error, not a fallback or
-an unvalidated redirect. There is **no SSO**: each new application authorization
-requires credentials, even with an existing Crow account session. Refreshing an
-existing app session is separate from cross-app sign-in.
-
-### Integration boundary
-
-Hosted login is the only supported application sign-in path, including for
-first-party apps. Apps may display a “Continue with Crow” button that redirects
-to Crow, but must not collect or forward Crow usernames/passwords for login or
-registration. No application-facing password login or registration API is offered.
-Crow's hosted pages submit credentials to Crow's own authentication backend.
-
-Application APIs support code exchange, refresh, and permitted identity,
-subscription, and management operations under the permissions above. The
-application backend keeps its client secret private. Button branding is optional.
-
-## Hosted pages
-
-The frontend uses Next.js.
+Direct login/registration creates the shared Crow browser session and goes to
+/account. Hosted app login creates that session but continues to the app callback.
+Protected pages require login. Next.js serves these pages:
 
 | Page | Purpose |
 | --- | --- |
-| `/login` | Crow account login or hosted UI for a flow validated by `/oauth/authorize` |
-| `/register` | Create one Crow account and continue the pending login flow |
-| `/account` | Show UUID, username, subscriber status, and session logout controls |
+| `/login` | Portal login or hosted UI for a validated app flow |
+| `/register` | Create an account, preserving any bound app flow |
+| `/account` | UUID, username, subscription status and portal logout |
 | `/applications` | List owned apps and register an app |
-| `/applications/{id}` | Manage name, callbacks, and backend client secrets; show client ID |
+| `/applications/{id}` | Manage name, callbacks, client secrets and enabled state |
 
-Completing registration in a valid pending hosted application flow proceeds to
-consent, then issues an authorization code after approval; a second login is unnecessary. Registration without
-application parameters creates an account session and continues to `/account`.
-Hosted registration requests and responses still require an explicit API contract.
+Any signed-in developer can register an app without manual approval. An app has
+an owner, name, public client ID and exact registered callbacks. Only the owner
+manages it. Domain verification is initially unnecessary; registration does not
+establish trustworthiness.
 
-Profile edits and billing screens are not yet defined. No separate developer
-identity, embedded components, or broad admin dashboard is required.
+Require HTTPS callbacks except HTTP on exact localhost or 127.0.0.1 hosts.
+Match full registered URLs exactly, including path, query and port. No fragments
+or wildcards. Removed callbacks cannot be used for later redirects or exchanges.
 
-## Service responsibilities
+Client secrets are displayed once. Up to two can be active, identified by ID and
+creation date. Rotation overlaps until explicit revocation. Revoking a secret
+does not itself revoke user sessions, but subsequent authenticated requests need
+a valid secret. Owners can disable/re-enable apps; permanent deletion is deferred.
+Disablement blocks new authorization, exchange, refresh and app-token Crow API
+access and revokes existing refresh families. Re-enabling never restores them.
+Previously issued access tokens expire naturally; they are not credentials for
+an app's own APIs under the initial Crow resource-token contract.
 
-Rust/Axum owns the account, application, and authentication API, including
-refresh-session creation, rotation, revocation, and signing initial and refreshed
-JWT access tokens. PostgreSQL stores durable account and session state.
-JWT access tokens are validated cryptographically. See ARCHITECTURE.md for transaction boundaries and
-remaining technical decisions. Authentication beyond the existing Rust skeleton
-is planned.
+## Sessions and failure behavior
 
-## Sessions and subscriptions
+| Credential or flow | Lifetime |
+| --- | --- |
+| Access JWT | 10 minutes; Crow resource API audience |
+| OIDC ID token | 10 minutes; integrating client audience |
+| Refresh family | 7 days idle or 30 days total, whichever is first |
+| Crow browser session (SSO and portal) | 8 hours absolute |
+| Pending hosted flow | 15 minutes |
+| Authorization code | 60 seconds after issuance |
 
-JWT access tokens last 10 minutes and target the configured Crow resource API
-audience; their `client_id` identifies the integrating app. OIDC ID tokens also
-last 10 minutes and target the app's client ID. Refresh sessions expire after 7 days idle or 30 days total, rotate on
-use, and revoke the session family on reuse. Refresh-session state lives in
-PostgreSQL; unavailable storage fails closed.
-Normal logout revokes the current refresh session family and clears the local
-session. Existing JWTs expire naturally, within 10 minutes. Other application
-sessions and devices remain signed in. Portal logout clears the current Crow
-account/developer session. Global logout is outside the initial scope.
+Backends retain tokens in protected server storage; browsers receive a random
+app-session cookie handle. Refreshes must be serialized across backend instances.
+Rotation consumes the old refresh token. Reuse revokes the entire family,
+including accidental duplicates; no grace window or response replay exists.
 
-Before Stripe integration, the authenticated subscription endpoint returns a
-default non-subscriber status for every user. The first authentication milestone
-includes hosted application login and registration, including the hosted pages
-needed for that flow. Direct password login by integrating apps is outside scope.
+App logout revokes its current refresh family and clears local state. Other apps
+and devices remain signed in. Portal logout invalidates the current Crow browser
+session, ending SSO in that browser, but does not revoke existing app sessions
+or refresh families. App logout does not end the Crow browser session; signing
+in to that app again can therefore use SSO.
+Global logout and OIDC logout protocols are outside initial scope. Without offline
+access there is no refresh family; local app-session expiry must be bounded and
+requires fresh authorization when new Crow tokens are needed. ID-token expiry
+alone does not define an app's local session duration.
 
-Stripe subscriptions belong to Crow Auth and assign a subscriber role automatically
-from verified events once eligible states are defined. All features stay unlocked.
-Cancellation retains status through the paid period. Failed payments retain
-existing status for a 7-day grace period; unresolved failure then removes it.
-Duplicate events do not restart grace or grant status to a non-subscriber.
+PostgreSQL stores all account/session state. Exchange consumes the code and,
+when applicable, creates its family transactionally. Tokens are returned only
+after confirmed commit. Unavailable storage grants no tokens. Uncertain commit
+outcomes or lost successful exchange/refresh responses require fresh authorization;
+never blindly retry. Missing refresh records require login.
 
-## Scope and remaining decisions
+## Subscriptions and deferred scope
 
-No initial SSO, social/passwordless login, MFA, password recovery, organizations,
-teams, app-specific business roles, paid feature gating, or Clerk/Google feature
-parity. OAuth/OIDC compatibility is part of the initial authentication milestone;
-Google/Discord login options remain future work.
+Before Stripe, subscription reads return non-subscriber for everyone. Subscription
+status stays out of tokens and gates no features. Future Stripe subscriptions
+belong to Crow. Cancellation retains status through the paid period. Failed
+payment retains existing status for seven days; unresolved failure removes it.
+Duplicate events neither restart grace nor grant status to a non-subscriber.
 
-Before exposing additional features, define profile edits and review the detailed API contracts. Consent, secret provisioning, session storage, and signing-key policy are confirmed below. Confirmed technical decisions are recorded in ARCHITECTURE.md; they are not yet implemented. API_CONTRACT.md proposes endpoint shapes for review. Billing still needs purchaser/customer ownership, eligible states,
-pricing/plans/trials, interfaces, refunds, payment recovery, overlapping lifecycle
-rules, and reconciliation. Do not invent answers during implementation.
+Before billing implementation, define purchaser/customer ownership, eligible
+states, plans/prices/trials, interfaces, refunds, payment recovery, lifecycle
+precedence, webhook idempotency and reconciliation. Billing does not block auth.
 
+External/social/passwordless login, MFA, recovery, profile/password changes,
+account deletion, organizations/teams, app business roles, paid feature gating,
+embedded components and a broad admin dashboard are deferred. Define their
+contracts before exposure. Clerk/Google feature parity is not a requirement.
 
+## Build order
 
+1. Accounts, migrations and shared Crow browser sessions for portal and SSO.
+2. Owned app registration, callbacks and secret management.
+3. Hosted authorization, registration and consent.
+4. Discovery, code exchange, ID/access tokens and UserInfo.
+5. Refresh, revocation, disablement and subscription reads.
+6. Integration/conformance checks and deployment hardening.
 
-## Confirmed implementation decisions
-
-These decisions supersede earlier open questions. See [Architecture](ARCHITECTURE.md)
-for enforcement and [API contract](API_CONTRACT.md) for proposed wire formats.
-
-- Normalize usernames by trimming surrounding whitespace and lowercasing ASCII
-  uppercase letters. Then require 3–32 characters matching `[a-z0-9_]+`. Enforce
-  uniqueness in PostgreSQL. Username changes are unavailable initially.
-- Passwords contain 15–128 Unicode code points; spaces, Unicode and paste are
-  allowed. No composition rules. Never trim, normalize, lowercase or truncate
-  passwords. Reject common/compromised passwords and store Argon2id hashes.
-- Application backends store Crow access, ID and refresh tokens; browsers receive an application
-  session cookie containing a random handle. Refreshes are serialized across
-  backend instances. Crow portal sessions are separate.
-- Application login/registration creates no portal session. Direct portal login
-  or registration creates a portal session, with an absolute eight-hour expiry.
-- Authorization codes expire 60 seconds after issuance. PKCE S256 and client
-  authentication are required. Pending browser-bound flows expire after 15 minutes.
-- Require HTTPS callbacks except HTTP on exact `localhost` or `127.0.0.1` hosts.
-  Match complete registered URLs exactly, including path, query and port; reject
-  fragments and wildcards. The actual production domain remains undecided.
-- First use requires explicit consent to requested UUID, username and subscription
-  permissions. Show the application name and destination domain without implying Crow
-  verification or endorsement. Remember consent; ask again if permissions expand.
-  Authentication is still required for each new authorization. Issue codes only
-  after consent. Declining consumes the flow and redirects to the validated
-  callback with `error=access_denied` and original state, without codes or tokens.
-  A newly registered account remains created. Invalid callbacks never receive redirects.
-- Generate high-entropy client secrets, show once to the owner, and store only
-  verifiers. Permit two active secrets per app, identified by ID and creation time.
-  Rotation permits overlap until explicit revocation. Revoking a client secret
-  does not itself revoke user sessions.
-- Owners can disable and re-enable applications; permanent deletion is deferred.
-  Disablement blocks new authorizations, code exchanges, refresh and app-token
-  access to Crow APIs, and revokes existing refresh families. Re-enabling cannot
-  restore revoked sessions. Existing JWTs can remain usable at app APIs until expiry.
-- UserInfo and subscription APIs require a Bearer access token with the Crow
-  resource audience, an enabled issuing `client_id`, and the required scope.
-  Derive the user from `sub`; never accept ID tokens as access tokens.
-- Use temporary account-and-IP throttling, not permanent account lockout. Configure
-  separate registration, code-exchange and refresh limits before public deployment.
-- Use OAuth 2.0 Authorization Code Flow with PKCE S256 and OpenID Connect Core.
-  Support discovery, UserInfo and RFC 7009 refresh-token revocation. Only
-  confidential backend clients and `client_secret_basic` are supported initially;
-  implicit, password and client-credentials grants are excluded.
-- Scopes: `openid` releases the UUID, `profile` releases `preferred_username`,
-  `crow.subscription` permits subscription reads, and `offline_access` requests
-  refresh tokens with explicit consent. Disclose requested permissions; remember
-  ordinary consent, but require explicit offline-access consent for a new grant.
-  No initial SSO: `prompt=none` returns `login_required`; authenticate interactive
-  requests even when the portal is signed in. Support `prompt=login` and
-  `prompt=consent`; reject unsupported prompt values and combinations.
-
-Billing, profile edits, password changes/deletion, recovery, MFA remain separate work. Forgotten-password recovery is unavailable and
-must be disclosed during registration. All features remain unlocked regardless of
-subscription status. Before Stripe, subscription responses are non-subscriber.
+Use [Architecture's acceptance checks](ARCHITECTURE.md#first-milestone-acceptance-checks)
+throughout implementation; security controls belong with each feature.
