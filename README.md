@@ -1,61 +1,81 @@
-# crow-auth
+# Crow Auth
 
-Rust HTTP service using Axum and Tokio. Authentication is not implemented yet.
+**Sign in with Crow.** A small OpenID Connect provider that external developers
+can integrate using standard libraries.
 
-## Design documents
+Crow aims to give users one account across independent apps and give developers
+one predictable sign-in integration. It is designed to be maintainable by one
+person: one Rust service, PostgreSQL, hosted pages and a small developer portal.
 
-Crow Auth is a planned OAuth 2.0/OpenID Connect identity provider and subscription
-service with hosted login, browser SSO and backend-only app integrations.
+## Current implementation
 
-- [Product behavior](docs/PRODUCT.md)
-- [Architecture and security](docs/ARCHITECTURE.md)
-- [Draft API contract](docs/API_CONTRACT.md)
-- [Implementation milestones](docs/IMPLEMENTATION.md)
-- [AI contributor instructions](AGENTS.md)
+The repository contains an Axum/Tokio HTTP skeleton with SQLx PostgreSQL
+connectivity. Startup requires `DATABASE_URL`, opens a pool of up to five
+connections, runs `SELECT 1`, and listens on `127.0.0.1:3000`.
+`GET /health` returns `ok`; it is liveness, not database readiness.
+Two startup tests cover missing configuration and credential-safe failure.
+Accounts, pages, email delivery, OAuth/OIDC and developer management are **not
+implemented**. The documents below specify the intended first release.
 
-The design documents describe planned behavior; the runnable implementation is
-the skeleton below. See [AGENTS.md](AGENTS.md) for document ownership and decision labels.
+## First release
 
-## Development
+- Hosted registration, email verification, login and password recovery.
+- One Crow browser session for portal access and cross-app sign-in.
+- Self-service registration of external developers' apps.
+- Authorization Code Flow with PKCE, discovery, signed ID tokens and UserInfo.
+- Confidential web clients: every integrating app has a backend that keeps secrets.
+- Minimal app settings: name, callbacks, client secrets and enabled state.
 
-Install a stable Rust toolchain and PostgreSQL (or Docker). To start a local database (Bash):
+Billing, subscriptions, refresh tokens, native/browser-only clients, custom SDKs,
+embedded widgets, organizations and upstream social login are outside this release.
+Crow provides identity; each integrating app owns its users' application data,
+authorization rules and local sessions.
 
-```sh
-read -rsp 'Local PostgreSQL password: ' POSTGRES_PASSWORD; echo
-export POSTGRES_PASSWORD
-docker run --name crow-auth-postgres --rm -d \
-  -e POSTGRES_USER=crow_auth -e POSTGRES_PASSWORD -e POSTGRES_DB=crow_auth \
-  -p 127.0.0.1:5432:5432 postgres:17
-docker exec crow-auth-postgres pg_isready -U crow_auth -d crow_auth
-unset POSTGRES_PASSWORD
-```
+## Documentation
 
-Wait until `pg_isready` reports that the database accepts connections. Set
-`DATABASE_URL` in your shell using your local credentials (URL-encode special
-characters in the username and password). This is a placeholder, not a working credential:
+| Document | Authority |
+| --- | --- |
+| [Product](docs/PRODUCT.md) | Scope, user journeys and lifecycle behavior |
+| [Architecture](docs/ARCHITECTURE.md) | Storage, trust boundaries and security enforcement |
+| [API contract](docs/API_CONTRACT.md) | Supported protocol and browser routes |
+| [Developer integration](docs/INTEGRATION.md) | Planned integration walkthrough and client responsibilities |
+| [Operations](docs/OPERATIONS.md) | Deployment, backups and incident procedures |
+| [Implementation](docs/IMPLEMENTATION.md) | Build order, open decisions and completion evidence |
+| [Contributor instructions](AGENTS.md) | Change discipline and verification |
+
+**Accepted** means chosen planned behavior. **Open** means a decision is still
+required at the stated gate. **Deferred** means outside the first release.
+None of these labels means implemented. Implementation status belongs in this
+README and the milestone ledger.
+
+## Local development
+
+Install stable Rust and a running PostgreSQL instance. Set a local connection
+string in your shell; the following is a placeholder, not a credential:
 
 ```sh
 export DATABASE_URL='postgres://<user>:<url-encoded-password>@127.0.0.1:5432/crow_auth'
-```
-
-Then run:
-
-```sh
 cargo run --locked
 ```
 
-The server listens on `127.0.0.1:3000`. `GET /health` returns `ok`.
-At startup it connects a SQLx PostgreSQL pool, runs `SELECT 1`, and stores the pool
-in Axum application state. Missing configuration or an unavailable database stops
-startup with an error that does not include credentials. `/health` is a basic HTTP
-liveness endpoint; it does not check ongoing database health.
+URL-encode special characters in database credentials. Do not commit the real
+connection string. A missing or unavailable database stops startup.
+
+In another terminal:
 
 ```sh
-cargo check --locked
-cargo test --locked
 curl --fail http://127.0.0.1:3000/health
 ```
 
-Stop the local database with `docker stop crow-auth-postgres`. This disposable
-container does not retain data after removal. User tables and authentication
-flows are not included yet.
+For Rust changes:
+
+```sh
+cargo fmt --check
+cargo check --locked
+cargo clippy --locked --all-targets -- -D warnings
+cargo test --locked
+```
+
+Documentation-only changes require link/consistency checks and `git diff --check`.
+Production configuration described in Operations is planned and is not yet
+accepted by the running skeleton.

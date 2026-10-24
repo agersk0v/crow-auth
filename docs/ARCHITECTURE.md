@@ -1,193 +1,155 @@
-# Crow Auth architecture and security
+# Architecture and security
 
-## Status and authority
+## Shape and boundaries
 
-**Accepted:** planned security requirements unless labeled otherwise. See
-[AGENTS.md](../AGENTS.md) for document ownership and decision labels.
+Accepted design: one Rust/Axum/Tokio process and private PostgreSQL. The process
+serves hosted pages, the developer portal, OAuth/OIDC and UserInfo on one configured
+HTTPS origin. Use server-rendered templates and ordinary forms. No separate SPA,
+Redis, message broker, signing service or microservices are required.
 
-Before protocol implementation, evaluate library coverage and document which
-security responsibilities remain Crow's.
+A transactional email provider is the only additional product dependency. Persist
+email jobs in PostgreSQL and process them in the same service. Multiple instances,
+if later needed, must coordinate job claims and limits through durable state.
 
-## Services and trust boundaries
+Crow authenticates its accounts. App backends authenticate their own sessions and
+keep Crow credentials server-side. Crow tokens never authorize portal management
+or an integrating app's own APIs. Client credentials alone grant no user access.
 
-One Rust/Axum application owns accounts, app management, browser sessions,
-authorization, token issuance and resource APIs. It renders hosted and portal
-pages using templates with HTMX enhancements. The template library is not yet
-selected. Standard forms and redirects must work without HTMX; client-side state
-and HTMX headers are never authorization evidence.
+Before implementation, select maintained libraries and record responsibility for
+provider-side request validation, JWT signing, PKCE, secure randomness, password
+hashing, templates and email. Never assume a client library implements a provider.
 
-Pages, API, OAuth and discovery endpoints share one configured HTTPS origin.
-No separate Next.js server, refresh service or internal signing protocol is needed.
-PostgreSQL is private, authenticated and authoritative for durable state.
-Subscription billing is deferred.
+## Durable model
 
-The [token formats](API_CONTRACT.md#token-claims-and-validation) suit the initial
-deployment: Crow is the only access-token resource server and every resource
-request already needs durable grant/app checks.
+These are logical records, not a prescribed migration or generic repository layer:
 
-Application integrations and user-visible session boundaries follow
-[Product](PRODUCT.md). Enforce app ownership on every management operation;
-derive the owner from the browser session, never a supplied owner ID.
-App tokens never authorize portal management.
+| Record | Responsibility |
+| --- | --- |
+| Accounts | Internal UUID, unique username/email keys, password hash, verification and security version |
+| Browser sessions | Token verifier, account, authentication time, expiry and revocation |
+| Apps and callbacks | Owner, client ID, name, immutable sector, enabled state, exact callbacks |
+| Client secrets | Verifier, app, identifier, creation and revocation |
+| Pending flows | Browser binding, request parameters, stage, authenticated session |
+| Consents | Account, app and approved scopes |
+| Subject mappings | Stable random subject per account and sector |
+| Codes | Verifier, bindings, expiry, consumption and resulting grant |
+| Grants and access tokens | Account, app, subject, scopes, audience, expiry and revocation |
+| Email credentials and jobs | Purpose, account, verifier, expiry, consumption and delivery state |
 
-## Accounts, identifiers and secrets
+Enforce uniqueness and foreign keys in PostgreSQL. Preserve subject mappings for
+the life of the account; never regenerate them on login, secret or key rotation.
+Do not expose the internal UUID. Subject-sector rules belong to the
+[API contract](API_CONTRACT.md#subjects).
 
-Product owns username/password input rules. Enforce normalized username uniqueness
-in PostgreSQL. Hash passwords with Argon2id, unique random salts and stored cost
-parameters. Benchmark costs before public deployment. Run hashing on a bounded
-blocking-worker pool with bounded queues, away from Tokio async workers.
-Request-size limits must permit the full supported UTF-8 password.
-Select a common/compromised-password dataset and update process before release;
-never send plaintext passwords to a third party.
+Use cryptographically random credentials with at least 256 bits of entropy for
+sessions, flow bindings, codes, client secrets, access and email tokens. Store
+verifiers, not usable bearer values. High-entropy credentials may use a maintained
+cryptographic digest; passwords require Argon2id with unique salts and stored cost
+parameters. Benchmark hashing and use a bounded blocking pool and queue.
 
-Keep the internal account UUID separate from external subjects. Store a stable,
-cryptographically random opaque subject for each user/sector pair, with uniqueness
-constraints on the pair and the subject. Use the same mapping in ID tokens, access
-tokens and UserInfo for that client's sector. Resolve it server-side to the internal account
-for resource access. Do not regenerate subjects on login or secret rotation.
-Preserve mappings in backups; an identifier is not an authentication credential.
+## Browser protection
 
-Generate high-entropy client secrets and store only verifiers. Product owns
-display, active-secret limits and rotation behavior. Never log passwords, tokens,
-authorization headers, client secrets, signing keys, database credentials or
-sensitive callback queries.
+Crow sessions use host-only Secure, HttpOnly, SameSite=Lax cookies. Rotate the
+handle on credential authentication, revoke the old handle and invalidate its
+unfinished authenticated flows. SSO never extends the original absolute deadline.
+Local HTTP development needs a separate explicit cookie configuration; production
+must fail configuration validation if secure cookies or HTTPS are disabled.
 
-Password replacement must atomically update the hash and invalidate account
-sessions, authenticated flows, codes, grants and refresh families as required by
-[Product](PRODUCT.md#accounts). Serialize it with authentication, authorization
-completion, exchange and refresh so concurrent operations cannot commit usable
-credentials based on the previous password/security state. Define the account
-locking or security-version mechanism before implementation. Failure rolls back
-both the password update and invalidation; return success only after confirmed commit.
+Issue a random anonymous browser session and synchronizer CSRF token before
+login/registration. Bind authenticated CSRF tokens to their current session.
+All form mutations, including login, require both CSRF verification and exact
+configured Origin validation; reject absent or unexpected Origin. Rotate CSRF
+state with session replacement. Email-link GETs render a confirmation form; only
+protected POSTs consume credentials or change account state.
 
-## Browser security and sessions
+Escape templates, disallow framing, set a restrictive content security policy,
+use no-store for sensitive pages/responses and a no-referrer policy for credential
+pages. Bound request bodies and execution time. Never use submitted return URLs,
+HTMX headers or browser-provided account IDs as authority.
 
-Application backends store tokens server-side; their browsers receive random
-session handles in Secure, HttpOnly cookies. Each app owns its cookie, CSRF and
-local-session protection.
+## Flow and transaction rules
 
-Store verifiers of Crow browser-session tokens with user UUID, original
-authentication time, creation time, absolute expiry and revocation state.
-Cookies are host-only, Secure, HttpOnly and SameSite=Lax. Rotate the handle on
-credential authentication, revoke the prior handle and establish a new session.
-SSO reuse preserves the original authentication time and deadline.
-[Product](PRODUCT.md#sessions-and-failure-behavior) owns lifetimes and logout effects.
+A pending authorization request is bound to a separate initiating-browser secret;
+a flow ID alone grants no authority. Each tab has its own flow record. Stages are
+pending authentication, pending consent, completed, denied and expired. Exactly
+one terminal transition is permitted.
 
-Cookie-authenticated mutations, including login/registration, require CSRF tokens
-and validated Origin checks. Protect pages against framing, escape untrusted
-template content, bound request sizes and prevent sensitive-response caching.
-SameSite and CORS are not substitutes for CSRF or authorization. Define CSRF
-issuance before browser endpoint implementation.
+Store request values server-side after validation. Bind authentication to a live
+Crow session and its account. Recheck session, account security version, consent,
+app enabled state and callback registration before completing. Do not silently
+switch an authenticated flow to another account. Logout or session replacement
+invalidates its authenticated flows. Unauthenticated flows may bind to a newly
+authenticated session only after checking their own browser binding.
 
-Top-level redirects are the supported SSO path. Hidden iframes and third-party
-cookies are not a reliability requirement.
+Code issuance and flow completion are atomic. Exchange atomically consumes a code
+and creates its access grant. Prepare signed ID tokens and random credentials
+before commit; send them only after confirmed commit. Signing failure rolls back.
+Two simultaneous exchanges cannot both succeed.
 
-## Authorization state machine
+Retain consumed-code verifiers and grant links until the issued grant expires.
+A replay that passes original client authentication, callback and PKCE bindings
+revokes the resulting grant and returns `invalid_grant`. Invalid bindings cannot
+revoke another grant. Database failures fail closed.
 
-Store validated pending requests in PostgreSQL, bound to an initiating-browser
-secret. Retain client, exact callback, state, nonce, scopes and PKCE challenge.
-Use opaque flow IDs to support independent tabs; an ID alone grants no authority.
-Flow credentials grant no portal permissions.
+A lost success response or uncertain commit requires a new authorization request.
+There is no safe code-exchange retry promise. Cleanup removes expired records;
+it is never the mechanism enforcing expiry or revocation.
 
-Stages are pending authentication, pending consent, completed, denied and expired.
-Only one terminal transition is allowed. Store authenticated user, authentication
-time and associated browser session server-side. Never accept a browser-selected
-user ID or silently change a flow's authenticated account.
-Logout or replacement of its session invalidates unfinished authenticated flows.
+Before each migration, document transaction isolation and lock order. Serialize
+app disablement/callback removal with authorization completion and exchange.
+If removal wins, no later redirect or exchange may use that callback. An already
+committed response cannot be recalled. Disablement atomically revokes grants;
+re-enabling never restores them.
 
-Enforce Product/API freshness and consent requirements. Recheck browser-session
-validity and identity before completion, including after credential login.
-Code creation and flow completion are atomic. Callback validation and protocol
-bindings follow [API contract](API_CONTRACT.md#authorization-get-oauthauthorize).
+Password replacement atomically changes the hash, advances the account security
+version and invalidates the records listed in [Product](PRODUCT.md#accounts).
+Credential verification, flow completion, exchange and UserInfo must reject stale
+security versions. Serialize these operations with replacement so a concurrent
+operation cannot commit a new credential based on the old password. Failure
+rolls back replacement and invalidation together.
 
-Recheck enabled app state and current callback registration at completion and
-exchange. Serialize callback removal and app disablement with these operations
-using a consistent lock order. If removal wins, show a local error; do not redirect
-to the removed URL. A response committed before removal cannot be recalled.
+## Email credentials and delivery
 
-## Transactions and failures
+Verification and reset credentials are purpose-bound, single-use and account-bound.
+Consume them atomically with their state change, checking expiry and current
+account state. Reset credentials require a verified address. Never accept a new
+address from a reset request. Resending invalidates older credentials of that
+purpose; throttle issuance and delivery by account and source.
 
-Codes, browser sessions, consent, grants and refresh state live in PostgreSQL.
-Before implementing each operation, define isolation, lock order, uniqueness
-constraints, expiry and cleanup. Database failures fail closed.
+A delivery job may need a usable link. Encrypt that payload at rest with a
+separately provisioned key, restrict worker access and delete it after delivery
+or expiry. Keep only token verifiers in the credential table. Job retries reuse
+the same valid link; duplicates never create additional usable credentials.
+Do not log message bodies or link queries. Email outages delay verification and
+recovery; they never bypass them. Establish pending-account expiry and retention
+before registration is exposed.
 
-Code exchange atomically consumes the code and creates its grant and optional
-refresh family. Constraints and locking prevent duplicate consumption/families.
-Prepare signed ID tokens and opaque credentials before commit; return them only after
-confirmed commit. Signing failures roll back the transaction.
+## Tokens and signing
 
-A confirmed rollback leaves a code usable within its original lifetime.
-Allow a bounded client retry only with an explicitly defined safe-retry signal.
-An uncertain exchange commit or lost success response requires fresh authorization;
-a generic error or timeout never proves rollback.
+Access tokens are opaque and accepted only by Crow UserInfo. Every request checks
+the stored verifier, expiry, audience, scopes, account security version, enabled
+app and live grant. No app/grant cache in the first release.
 
-Generate high-entropy opaque access tokens and store only their verifiers with
-the issuing client, user/sector subject mapping, scopes, Crow resource audience,
-issuance/expiry and grant relationship. Each resource request resolves the
-verifier and applies the [resource validation rules](API_CONTRACT.md#token-claims-and-validation).
+ID tokens are RS256 JWTs using provisioned RSA keys of at least 3072 bits. Public
+keys are exposed through JWKS; private keys never enter source, images or logs.
+Claims and client validation belong to the [API contract](API_CONTRACT.md#tokens).
 
-Retain consumed-code verifiers and issued-grant relationships until the grant can
-no longer be used. A replay passing original-client authentication, callback and
-PKCE bindings revokes its refresh family, if any, and marks its access-token grant
-revoked. Invalid bindings must not revoke another grant. Resource APIs check grant
-state until token expiry. App-local sessions cannot be remotely cleared this way.
+Rotate signing keys at least every 90 days. Publish new keys ten minutes before
+activation; keep old public keys fifteen minutes after the final signer stops
+using them. JWKS cache max-age is at most five minutes. Unknown-key refresh must
+be bounded. Emergency replacement and external cache limitations are covered in
+[Operations](OPERATIONS.md#incidents).
 
-Enforce [Product app disablement and re-enablement](PRODUCT.md#portal-and-developer-apps)
-by atomically marking the app disabled and revoking its grants and refresh families.
-Serialize this with authorization completion, exchange and refresh through durable
-app state and consistent transaction locking. Cleanup is not the enforcement mechanism.
+## Abuse and failures
 
-## Token signing and keys
+Use generic authentication/recovery messages and comparable processing paths.
+Apply separate temporary account/source limits to registration, login, email,
+client creation, authorization and exchange. Include request-size limits,
+bounded password work and trusted-proxy configuration. Store shared budgets in
+PostgreSQL when running more than one instance. Reject credential operations if
+the required limiter cannot enforce its budget.
 
-[API contract](API_CONTRACT.md#token-claims-and-validation) owns ID-token claims
-and protocol validation. Sign ID tokens with a securely provisioned 3072-bit RSA private key.
-Never commit private keys or bake them into images.
-
-Rotate keys every 90 days. Publish new public keys at least ten minutes before
-activation across instances; retain old public keys for at least fifteen minutes
-after all instances stop signing with them. All signers must acknowledge rollout;
-a lagging signer extends retention. Set bounded JWKS cache lifetimes and
-rate-limited refresh on unknown kid before exposure.
-
-Define emergency replacement and rejection procedures. External caches can delay
-rejection, and a compromised signer can forge trusted tokens.
-
-## Refresh and revocation
-
-**Deferred:** see [integration scope](PRODUCT.md#login-and-consent).
-
-Use high-entropy opaque refresh credentials stored as verifiers with user,
-client, family, scopes, creation time, last successful use, absolute deadline and
-revocation state. Retain spent-token evidence until family expiry.
-Lock family/token state; rotate atomically and return credentials only after
-confirmed commit. Never extend the original absolute deadline.
-
-**Unresolved:** duplicate/retry behavior, any grace window, theft response and
-recovery after an ambiguous commit or lost response. Do not implement refresh
-until the policy is accepted and its protocol outcomes are recorded in the API
-contract. The decision must prevent independent successor branches and define
-whether spent credentials can produce any response.
-If replay is selected, define protected response storage, retention and deletion;
-the existing verifier-only model cannot reconstruct a returned refresh token.
-Provide a reference backend covering concurrent requests and failures.
-
-Follow the disablement coordination rules in
-[Transactions and failures](#transactions-and-failures).
-Missing, expired or revoked state grants no tokens. Product owns logout effects.
-
-## Operations and deployment gates
-
-Use generic login failures, temporary normalized-account/IP throttling and
-separate registration/exchange/refresh limits. Shared deployments need shared
-budgets. Choose numeric limits, trusted proxies and limiter-outage behavior before
-exposure. Define security-log access and retention without storing credentials.
-
-Before deployment, define connection budgets, timeouts, graceful shutdown,
-migrations, metrics, readiness, durability, backups and restore procedures.
-HTTP liveness remains distinct from database readiness.
-A restore can resurrect consumed tokens and revoked sessions: invalidate affected
-sessions, flows/codes and grants before serving restored state.
-
-Any app/grant cache needs explicit invalidation and maximum staleness. Add caches,
-partitioning or services only when measurements justify them.
-[Implementation](IMPLEMENTATION.md) assigns verification to each milestone.
+Record numeric limits and measured costs before public exposure. Logs may contain
+request IDs, operation names and safe outcomes; never passwords, secrets, tokens,
+headers, email links, database URLs or sensitive callback queries. Restrict audit
+access and retention. Deployment and restore requirements belong to Operations.
