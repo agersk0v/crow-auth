@@ -9,12 +9,22 @@ service with hosted login, browser SSO and backend-only app integrations.
 
 - [Product behavior](docs/PRODUCT.md)
 - [Architecture and security](docs/ARCHITECTURE.md)
-- [Draft API contract](docs/API_CONTRACT.md)
-- [Implementation milestones](docs/IMPLEMENTATION.md)
+- [Milestone API contract](docs/API_CONTRACT.md)
+- [Readiness, ordered implementation checklist and acceptance tests](docs/IMPLEMENTATION.md)
 - [AI contributor instructions](AGENTS.md)
 
 The design documents describe planned behavior; the runnable implementation is
 the skeleton below. See [AGENTS.md](AGENTS.md) for document ownership and decision labels.
+
+## First authentication milestone (planned)
+
+Register and verify a Crow account, sign into backend app A, then sign into
+backend app B through the same Crow browser session without entering credentials
+again. The specification includes consent, recovery, password changes, account
+deletion, owned client management and explicit logout/failure behavior. It excludes
+refresh tokens, billing and global app logout. None of these auth features is
+implemented yet. The [implementation document](docs/IMPLEMENTATION.md) records the
+source review, resolved decisions, limitations, acceptance fixture and build order.
 
 ## Development
 
