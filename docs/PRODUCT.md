@@ -200,6 +200,9 @@ for enforcement and [API contract](API_CONTRACT.md) for proposed wire formats.
   Disablement blocks new authorizations, code exchanges, refresh and app-token
   access to Crow APIs, and revokes existing refresh families. Re-enabling cannot
   restore revoked sessions. Existing JWTs can remain usable at app APIs until expiry.
+- Every refresh authenticates client credentials and reads current app enabled
+  state directly from PostgreSQL, without a Redis app-status cache. If this
+  check is unavailable, refresh fails temporarily and returns no tokens.
 - Identity and subscription APIs require client credentials plus the user's JWT,
   with audience equal to that authenticated client's ID. Derive the user from `sub`.
 - Use temporary account-and-IP throttling, not permanent account lockout. Configure
