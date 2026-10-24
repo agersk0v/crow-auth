@@ -17,7 +17,7 @@ creates one Crow account and can use it to sign into any connected application.
 Clerk and signing into different apps with Google are references for the
 experience; compatibility or feature parity is not an initial requirement.
 
-Crow Auth owns the stable user ID, unique username, securely hashed password,
+Crow Auth owns the immutable UUID user ID, unique username, securely hashed password,
 and Crow subscription status. Connected applications own their application data
 and associate it with the Crow user ID. They do not need separate local account
 registration, usernames, passwords, or an independently generated user identity.
@@ -41,7 +41,10 @@ not implemented yet. All following feature sections describe planned behavior.
 
 ## Shared accounts and application data
 
-Initial registration and sign-in use a username and password. The same Crow
+Initial registration and sign-in use simple usernames and passwords; no email,
+social login, or additional account factors are required initially. Exact username
+characters, lengths, normalization, and password limits still need definition.
+The same Crow
 account and stable user ID work across connected applications; visiting a second
 application does not require another Crow registration.
 
@@ -128,9 +131,11 @@ not accept a callback or redirect tokens to a URL.
 
 Applications that collect Crow credentials directly handle those credentials;
 Crow's hosted login avoids exposing passwords to a connected application's
-login form. Client authentication and which application types may use direct
-password login remain security decisions. A public client ID alone must not
-allow an application to obtain tokens intended for a different application.
+login form. Direct username/password login is allowed only for authenticated
+backend applications. Browser applications use hosted login with PKCE and must
+not receive backend client secrets. The client authentication mechanism and
+credential provisioning remain to be defined. A public client ID alone must not
+authorize tokens for that client.
 
 The exact endpoint paths, request/response payloads, and error contracts are not
 yet defined. `/login` above identifies the hosted page, not a finalized API route.
@@ -170,15 +175,19 @@ The main authentication API uses Rust and Axum. A Go microservice in this same
 repository handles refresh tokens using Redis for refresh-token state.
 PostgreSQL stores persistent identity, application, and subscription data.
 
-Token lifetimes, signing-key rotation, refresh rotation and expiry, service
-communication, Redis persistence/outage behavior, and logout/revocation rules
-remain to be defined. Logout must be supported, but its exact scope and effect
+Access tokens expire 10 minutes after issuance. Refresh-token expiry remains
+undefined; this access-token lifetime does not remove the Go/Redis refresh flow.
+Signing-key rotation, refresh rotation and expiry, service communication, Redis
+persistence/outage behavior, and logout/revocation rules remain to be defined.
+Logout must be supported, but its exact scope and effect
 on already-issued JWTs are not yet agreed.
 
-Shared accounts are required. Reusing a Crow browser session to avoid entering
-credentials across applications (single sign-on), consent behavior, and global
-logout still need explicit session rules before implementation; they are not
-implied by sharing the same user ID.
+Shared accounts are required, but single sign-on is outside the initial scope.
+Each new hosted application authorization requires username/password entry, even
+if the user is signed into Crow or another connected application. A Crow account
+page session must not silently authenticate the user to a connected app. Refreshing
+an existing application session is separate from cross-application single sign-on.
+Crow account-session duration, consent, and logout scope still need definition.
 
 ## Subscriptions and roles
 
@@ -206,8 +215,10 @@ invent subscription lifecycle rules or role transitions during implementation.
 | --- | --- |
 | Main HTTP API | Rust, Axum, and Tokio |
 | Hosted frontend | Next.js |
+| Public routing | Nginx combines the frontend and backend under one origin |
+| Shared user IDs | Immutable UUIDs |
 | Persistent storage | PostgreSQL, accessed by the Rust API through SQLx |
-| Access tokens | JWT, with application-specific audiences |
+| Access tokens | JWT, with application-specific audiences and 10-minute expiry |
 | Hosted token handoff | Authorization code with PKCE and registered callbacks |
 | Refresh-token handling | Go microservice in this repository |
 | Refresh-token state | Redis |
@@ -220,7 +231,7 @@ scope does not yet claim OAuth or OpenID Connect standards compliance.
 ## Outside the initial scope
 
 - Password recovery/reset; recovery email requirements are undefined.
-- Social login, passwordless login, and multi-factor authentication.
+- Social login, passwordless login, multi-factor authentication, and single sign-on.
 - Embedded authentication UI components.
 - Organizations, teams, and application-specific business authorization roles.
 - Paid feature gating and a full entitlement system.
@@ -234,13 +245,13 @@ decisions. The subscriber role remains in scope.
 Resolve decisions for an affected feature before implementing it. Independent
 work within agreed scope can continue.
 
-1. Username uniqueness rules, password policy, profile fields and edits, and
-   whether an email address is collected.
-2. Direct API client authentication and permitted client types, user-information
+1. Simple username normalization/uniqueness and password limits, plus permitted
+   profile fields and edits; email is not initially required.
+2. Backend client authentication and credential provisioning, user-information
    access, and any consent requirements.
 3. Detailed callback rules, authorization-code contracts, and PKCE/state handling.
-4. Token lifetimes, refresh rotation, browser sessions/single sign-on, signing-key
-   management, service boundaries, and logout/revocation behavior.
+4. Refresh-token/code lifetimes, refresh rotation, Crow account-page sessions,
+   signing-key management, service boundaries, and logout/revocation behavior.
 5. Subscription purchasing, subscriber-role assignment, and billing lifecycle.
 
 Update this document when product decisions change and when planned features

@@ -30,6 +30,7 @@ eventual multi-service directory layout.
 
 | Component | Responsibility |
 | --- | --- |
+| Nginx | One public origin; routes hosted pages to Next.js and backend API requests to Rust |
 | Next.js frontend | Hosted login, registration, account, and developer application pages; calls the Rust API |
 | Rust / Axum / SQLx API | User credentials, application ownership, callback validation, authorization-code exchange, access-token signing, account APIs, and Stripe integration |
 | Go refresh-token service | Refresh-token issuance, validation, rotation, reuse detection, and revocation, backed by Redis |
@@ -39,12 +40,13 @@ eventual multi-service directory layout.
 
 Keep all service source in this repository. Separate directories can be introduced
 when those services are implemented; do not move the Rust crate merely to match a
-speculative layout. The Next.js version, Go version, and deployment topology are
-not selected yet.
+speculative layout. The Next.js and Go versions and the exact deployment layout
+are not selected yet.
 
-Recommended public routing puts hosted pages and the Rust API behind the Crow
-origin, with a distinct API prefix. Exact routing is not yet a contract. The Go
-service and databases should be internal; browsers and connected applications
+Nginx combines Next.js pages and the Rust API under one public Crow origin.
+Use a distinct API prefix so hosted `/login` and API operations do not conflict;
+the exact prefix, upstream addresses, and proxy configuration remain to be defined.
+The Go service and databases should be internal; browsers and connected applications
 must not access Redis or internal refresh-service operations directly.
 
 Rust owns persistent identity and application policy. Go should not independently
@@ -53,7 +55,7 @@ a second password-validation or token-signing authority.
 
 ## Identity and data ownership
 
-One user has one stable Crow ID across applications. JWT `sub` and account API
+One user has one immutable UUID Crow ID across applications. JWT `sub` and account API
 responses identify that same user. Connected applications associate their own
 records with this ID; they do not need a separate local account registration.
 Crow does not store their business data or control their database structure.
@@ -73,8 +75,11 @@ focused implementation design. Do not add email, organizations, paid entitlement
 or profile fields without a corresponding product decision.
 
 Use PostgreSQL constraints for identity uniqueness and application ownership
-relationships. Define username normalization and ID representation before the
-first user migration. A username is mutable display/login data only if editing
+relationships. Store user IDs as PostgreSQL UUIDs and serialize them as UUID
+strings in JWT `sub` and API responses. UUID generation/version and username
+normalization remain to be selected before the first user migration. Keep initial
+credentials to simple usernames and passwords, without requiring an email address.
+A username is mutable display/login data only if editing
 is later approved; it must never substitute for the stable ID.
 
 Recommended migration policy: versioned, forward-only SQL migrations, with
@@ -97,7 +102,9 @@ application. Only an application's owner may manage it.
 
 Recommended browser handling uses secure, HttpOnly cookies for the Crow session.
 Define cookie scope, SameSite behavior, CSRF protection, expiry, and session
-storage before implementing this flow. Never allow an arbitrary internal
+storage before implementing this flow. The cookie authenticates Crow account and
+developer pages only; it must not bypass credentials in a new application login.
+Single sign-on is outside the initial scope. Never allow an arbitrary internal
 post-login destination to become an open redirect.
 
 ### Hosted application login
@@ -108,7 +115,9 @@ post-login destination to become an open redirect.
    all application-flow parameters selects Crow's own login. Partial or invalid
    parameters produce an error without redirecting to an unvalidated destination.
 3. Next.js renders login or registration while preserving a server-validated
-   transaction. Revalidate transaction data on submission; do not trust editable
+   transaction. Each new application authorization requires username/password
+   entry, even when a Crow account-page session already exists. Revalidate
+   transaction data on submission; do not trust editable
    form fields to determine the eventual callback or audience.
 4. After authentication, Crow issues a short-lived, single-use authorization
    code bound to the user, client, callback, and PKCE challenge. The browser goes
@@ -133,10 +142,11 @@ and returns tokens as JSON, without a return URL. An application using this flow
 handles the user's Crow password. Hosted login avoids that exposure.
 
 A public client ID, CORS header, or claimed origin is not client authentication.
-The recommended initial restriction is direct password login for authenticated
-backend clients, with hosted code/PKCE login for public clients. This restriction
-requires approval: permitted client types and credential provisioning remain
-unresolved. Do not ship an endpoint that accepts any client ID as authorization
+Direct username/password login is restricted to authenticated backend
+applications. Browser applications use hosted authorization-code login with PKCE.
+Do not expose backend client secrets to browsers. The backend authentication
+mechanism and credential provisioning remain unresolved. Do not ship an endpoint
+that accepts any client ID as authorization
 to issue tokens for that client.
 
 ## Planned API capabilities
@@ -183,16 +193,17 @@ Rust is the proposed sole access-token signing authority. Use asymmetric signing
 so connected APIs receive public verification keys, not a shared signing secret.
 Select the algorithm and key-management mechanism before token implementation.
 
-JWTs identify Crow as `iss`, the stable user as `sub`, and the intended application
-as `aud`, and include expiry and issuance times. Receiving APIs must verify the
-signature with an allowlisted algorithm, issuer, audience, and time validity.
+JWTs identify Crow as `iss`, the immutable UUID user ID as `sub`, and the intended
+application as `aud`. Set expiry to 10 minutes (600 seconds) after issuance
+(`exp = iat + 600`). Receiving APIs must verify the signature with an allowlisted algorithm, issuer, audience, and time validity.
 They must reject another application's token, even when `sub` names the same user.
 Access tokens should contain minimal identity data; subscriber claims and their
 freshness remain undefined. JWT claims are readable, not encrypted secrets.
 
 Publish public keys with key IDs and support overlapping verification keys during
 rotation. Private signing keys remain outside Git and frontend bundles. Define
-token lifetime, clock tolerance, and rotation overlap before implementation.
+clock tolerance and rotation overlap before implementation. The 10-minute
+access-token lifetime does not determine refresh-token or browser-session expiry.
 Already-issued JWTs generally remain valid until expiry unless receiving APIs
 perform additional revocation checks; do not promise immediate global logout.
 
@@ -233,7 +244,11 @@ failure should silently introduce an unapproved feature restriction.
 
 ## Runtime, failures, and validation
 
-Expose the hosted frontend and public API through TLS in production. Keep
+Use Nginx to expose Next.js and the Rust API under one origin through TLS in
+production. Trust forwarded host/protocol headers only from the configured proxy;
+public callers must not be able to spoof the external origin used for security
+checks. Apply request-size and timeout limits at the proxy and service boundaries.
+Keep
 PostgreSQL, Redis, and internal service operations private. Configure connection
 strings, signing material, and service credentials through runtime configuration,
 never committed files. Exact variables beyond today's `DATABASE_URL` await the
@@ -264,11 +279,12 @@ do not claim nonexistent test commands or suites pass.
 
 Before implementing each affected feature, settle:
 
-1. Username normalization, password policy, profile fields, and stable ID format.
-2. Client types, direct-login eligibility/client authentication, user-data access,
-   and consent.
-3. Browser-session storage, single sign-on, cookie rules, and logout scope.
-4. Token/code lifetimes, signing algorithm/keys, refresh retry semantics, and
+1. Simple username/password rules and limits, profile edits, and UUID generation.
+2. Backend client authentication and credential provisioning, user-data access,
+   and consent. Direct password login eligibility is already backend-only.
+3. Crow account-session storage/duration, cookie rules, and logout scope. No SSO
+   is included in the initial scope.
+4. Refresh-token/code lifetimes, signing algorithm/keys, refresh retry semantics, and
    Redis durability and recovery.
 5. Migration tooling, service layout/contracts, and deployment/routing details.
 6. Subscription ownership, role assignment, billing lifecycle, and reconciliation.
