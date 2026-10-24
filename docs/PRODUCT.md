@@ -3,7 +3,8 @@
 Crow Auth is an API-first identity and subscription service for multiple apps,
 including apps built by external developers. One Crow account works across apps.
 Every integrating application must have a backend; browser-only applications
-are outside the initial scope.
+are outside the initial scope. All integrating apps use Crow-hosted login and
+registration; users enter their Crow passwords only on Crow pages.
 Clerk and Google sign-in are references, not feature-parity requirements.
 
 This document defines agreed product behavior. [ARCHITECTURE.md](ARCHITECTURE.md) records technical
@@ -33,6 +34,28 @@ is planned; authentication, frontend, Go/Redis, and Stripe are not implemented.
   secret; browser code never receives that secret. Domain verification is not
   initially required, and registration does not establish app trustworthiness.
 
+## Permissions
+
+Authentication as an application and authentication as a user are separate.
+A client secret identifies an application; it does not grant account-owner or
+developer permissions. All permissions below describe planned behavior.
+
+| Caller | Allowed operations | Boundaries |
+| --- | --- | --- |
+| Unauthenticated visitor | Create a Crow account and begin login or registration on Crow-hosted pages | Cannot read private account data or manage applications |
+| Application backend authenticated with its client secret | Exchange hosted authorization codes for its own client | Must also supply a valid code with PKCE; the secret alone grants no user access |
+| User authenticated with an application access token | Access the identity information released to that app and query their own subscription status | Crow verifies the token and expected audience and derives the user from it; no other user's data, portal management, or other app's data |
+| User authenticated with a Crow account/developer session | View their own account, register applications, and manage applications they own through pages or APIs | Ownership is checked on every application operation; no access to another developer's configuration or secrets |
+| Holder of a valid refresh token | Refresh or revoke the corresponding session through the supported protocol | Bound to its user, client, and session family; cannot manage accounts or applications |
+
+Application access tokens cannot be used as Crow account/developer sessions.
+Account creation grants no access to existing accounts. Subscription status is
+read-only for users and integrating applications. Public APIs do not allow
+callers to assign themselves subscriber status. Profile edits, password changes,
+account deletion, and billing mutations need explicit contracts before exposure.
+Browser code never receives client secrets. Detailed endpoint contracts must
+specify the required caller credentials and authorization checks.
+
 ## Login flows
 
 ### Crow account login
@@ -57,17 +80,17 @@ an unvalidated redirect. There is **no SSO**: each new application authorization
 requires credentials, even with an existing Crow account session. Refreshing an
 existing app session is separate from cross-app sign-in.
 
-### Direct API login
+### Integration boundary
 
-Authenticated backend apps may submit username/password and application details
-and receive tokens as JSON, without callbacks. The API is the primary integration surface. Apps may build their own login
-forms; Crow's Next.js frontend provides an optional hosted interface for apps
-without their own form. A custom form backed by an authenticated application
-backend can use direct API login. Hosted login is an optional alternative
-for applications with a backend and uses authorization codes with PKCE.
-The backend exchanges the code and keeps the client secret private. Permitted account and application operations remain available through APIs.
-Button branding is optional. External apps with custom forms can see the user's
-Crow password; registering an app does not establish that it is trustworthy.
+Hosted login is the only supported application sign-in path, including for
+first-party apps. Apps may display a “Continue with Crow” button that redirects
+to Crow, but must not collect or forward Crow usernames/passwords for login or
+registration. No application-facing password login or registration API is offered.
+Crow's hosted pages submit credentials to Crow's own authentication backend.
+
+Application APIs support code exchange, refresh, and permitted identity,
+subscription, and management operations under the permissions above. The
+application backend keeps its client secret private. Button branding is optional.
 
 ## Hosted pages
 
@@ -84,7 +107,7 @@ The frontend uses Next.js.
 Completing registration in a valid pending hosted application flow immediately
 issues an authorization code; a second login is unnecessary. Registration without
 application parameters creates an account session and continues to `/account`.
-Direct API registration responses still require an explicit API contract.
+Hosted registration requests and responses still require an explicit API contract.
 
 Profile edits and billing screens are not yet defined. No separate developer
 identity, embedded components, or broad admin dashboard is required.
@@ -108,6 +131,11 @@ session. Existing JWTs expire naturally, within 10 minutes. Other application
 sessions and devices remain signed in. Portal logout clears the current Crow
 account/developer session. Global logout is outside the initial scope.
 
+Before Stripe integration, the authenticated subscription endpoint returns a
+default non-subscriber status for every user. The first authentication milestone
+includes hosted application login and registration, including the hosted pages
+needed for that flow. Direct password login by integrating apps is outside scope.
+
 Stripe subscriptions belong to Crow Auth and assign a subscriber role automatically
 from verified events once eligible states are defined. All features stay unlocked.
 Cancellation retains status through the paid period. Failed payments retain
@@ -126,4 +154,5 @@ management. Proposed technical defaults are recorded in ARCHITECTURE.md and
 must not be treated as already implemented. Billing still needs purchaser/customer ownership, eligible states,
 pricing/plans/trials, interfaces, refunds, payment recovery, overlapping lifecycle
 rules, and reconciliation. Do not invent answers during implementation.
+
 

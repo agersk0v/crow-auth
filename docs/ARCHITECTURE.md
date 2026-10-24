@@ -20,8 +20,8 @@ affected flow; do not silently choose a security contract in code.
   access tokens, backed by Redis.
 - Redis: refresh-session records and replay detection. It does not replace
   PostgreSQL as the account store or make JWTs require database lookups.
-- Next.js: optional hosted login, registration, account, and developer pages.
-  APIs are the primary integration surface.
+- Next.js: required Crow-hosted login and registration, plus account and developer
+  pages. Application backends integrate through the supported APIs.
 - Stripe: planned billing integration; its detailed lifecycle contract is deferred.
 
 Initial token issuance and refresh-session creation must form a defined Rust/Go
@@ -32,10 +32,12 @@ failures are handled before implementation.
 
 Every integrating application must have a backend that authenticates with a
 client secret. Browser-only integrations are outside the initial scope. Browser
-code must never receive a client secret. Custom login forms send credentials
-through the application backend to Crow. Hosted login is an optional alternative;
-the application backend exchanges its authorization code using PKCE and client
-authentication.
+code must never receive a client secret. Hosted login and registration are the
+only supported application authentication path, including for first-party apps.
+Applications must not collect or forward Crow passwords. The application backend
+exchanges its authorization code using PKCE and client authentication. No
+application-facing password login or registration API is exposed; Crow-hosted
+pages submit credentials to Crow's own authentication backend.
 
 Hosted login requires a registered client, exact registered callback, request
 state, and PKCE. Successful authentication or registration returns a short-lived,
@@ -47,6 +49,19 @@ SSO. Registration satisfies authentication for its pending flow.
 An app's access token may retrieve only its authenticated user's subscription
 status. Derive that user from the verified token. Subscription status is not
 embedded in JWT claims. App business data remains owned by each app.
+
+## Authorization enforcement
+
+The permissions table in PRODUCT.md owns caller permissions. Every protected
+endpoint must declare its accepted credential type and enforce the corresponding
+user, client, audience, and ownership checks server-side. A client secret does
+not establish user identity; an application access token does not authorize
+portal account or developer operations. Derive resource ownership from verified
+identity and stored ownership, never solely from caller-supplied IDs.
+
+Reject missing credentials and unauthorized operations without exposing private
+resource details. Subscription status has no public user/app write operation.
+Internal subscription updates require their separately defined service contract.
 
 ## Confirmed session behavior
 
@@ -71,8 +86,9 @@ the current portal session. Global logout is outside initial scope.
 - Rate-limit registration, login, code exchange, and refresh using appropriate
   account, client, and network signals. Define numeric limits before release.
 - Use generic login failures to avoid revealing whether a username exists.
-- Use HTTPS for external traffic. External custom forms can observe Crow
-  credentials; developer registration is not an endorsement of those forms.
+- Use HTTPS for external traffic. Protect hosted credential-submission endpoints
+  against CSRF and origin abuse; do not enable cross-origin credential submission
+  by integrating apps. Prevent framing of hosted login and registration pages.
 - No recovery is initially provided: document that forgotten passwords cannot
   currently be recovered. Do not add an undocumented recovery bypass.
 
@@ -132,13 +148,14 @@ before choosing SameSite policy.
 
 Protect cookie-authenticated mutations with CSRF controls and origin checking.
 Use explicit CORS allowlists where needed; CORS is not client authentication.
-Keep portal sessions distinct from application refresh sessions. The optional
-frontend calls the same supported account/application APIs.
+Keep portal sessions distinct from application refresh sessions. Hosted pages
+use Crow account/application APIs with the permissions required for each
+operation; credential submission is reserved for Crow-hosted flows.
 
 ## Decisions required before implementation
 
 1. Username/password policies and account schema.
-2. Endpoint schemas, error codes, direct registration behavior, and code lifetime.
+2. Endpoint schemas, error codes, hosted registration behavior, and code lifetime.
 3. Initial signer, Rust/Go service contract, service authentication, signing-key
    storage, JWKS publication, and rotation.
 4. Portal session storage, browser token handling, cookie/CSRF/CORS rules.
@@ -154,15 +171,23 @@ decisions. Billing does not block the first authentication milestone.
 
 ## Acceptance checks for the first authentication milestone
 
-- A registered user can authenticate through a confidential backend and through
-  hosted login; registration completes the pending hosted authorization.
+- A registered user can authenticate through hosted login, with code exchange
+  by a confidential application backend; registration completes the pending
+  hosted authorization.
+- Integrating applications cannot exchange a username/password for tokens or
+  register accounts directly; credential submission is limited to Crow-hosted
+  flows, with CSRF/origin and framing protections.
 - Invalid callbacks, mismatched PKCE, expired/reused codes, wrong audiences,
   and invalid signatures fail.
 - Another user cannot manage an application they do not own.
-- An app token queries only its current user's subscription status.
+- A client secret alone cannot read user data or manage accounts/applications;
+  an application access token cannot authorize portal management operations.
+- An app token queries only its current user's subscription status. Before Stripe
+  integration, this endpoint returns non-subscriber for every user.
 - Refresh rotates atomically; reuse revokes the family; idle and total expiry
   work independently; Redis failure does not grant access.
 - Logout prevents further refresh for that session while other sessions remain.
 - Portal sessions cannot silently authorize a new application.
 - Authentication failures and logs expose no credentials or tokens.
+
 
