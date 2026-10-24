@@ -110,29 +110,31 @@ Require client headers and JSON:
 ```
 
 Validate client, enabled state, exact registered callback, code binding, expiry,
-S256 verifier and one-time use. Rust consumes the code and creates the refresh
-family and token verifier in one PostgreSQL transaction, with locks and
-constraints preventing duplicate exchanges. Prepare the initial signed JWT
-before commit; return tokens only after a confirmed commit. Proposed success:
+S256 verifier and one-time use. Rust consumes the code in PostgreSQL and creates
+the refresh family and token verifier in Redis. Return tokens only after code
+consumption and session creation are confirmed and JWT signing succeeds.
+There is no shared transaction across these stores. Proposed success:
 
 ```json
 {"access_token":"<JWT>","token_type":"Bearer","expires_in":600,"refresh_token":"<opaque-token>"}
 ```
 
-A 503 permits bounded retry before code expiry only when rollback is confirmed.
-Concurrent attempts cannot create multiple families. Once committed, code reuse
-fails. An uncertain commit outcome or lost public success response requires a
-new authorization. Before coding, specify transaction isolation, lock ordering,
-constraints and cleanup. Do not retain plaintext response tokens for replay.
+Before implementation, choose the exchange failure policy described in
+Architecture: consume-once and restart authorization after subsequent failure,
+or durable coordination with bounded internal retries. Do not promise retry of
+a consumed code until that policy is defined. Concurrent requests cannot create
+multiple usable families. A lost public success response requires new
+authorization. Define ambiguous writes and orphan cleanup explicitly.
 
 ### Refresh: POST /api/token/refresh
 
 Require client headers and `{"refresh_token":"<opaque-token>"}`. Validate client,
-enabled state and ownership. Rust locks the family and token records and
-atomically consumes the token and creates a successor in PostgreSQL. Sign the
-new JWT before committing; return the same success shape as exchange only after
-a confirmed commit, with new tokens. Family revocation on reuse must commit
-despite returning invalid_grant.
+enabled state and ownership. Rust uses an atomic Redis operation/script to
+validate and consume the token, create its successor and update the family.
+Return the same success shape as exchange only after signing succeeds and the
+Redis update is confirmed. Family revocation on reuse must take effect despite
+returning invalid_grant. Define signing/write ordering and durable app-state
+checks before implementation.
 Preserve original 30-day deadline and update seven-day idle expiry. Expiry,
 revocation or reuse yields invalid_grant; reuse also revokes the whole family.
 Dependency failure yields 503 without granting access. **Never automatically retry
@@ -200,23 +202,24 @@ No permanent app deletion, account editing/deletion or billing mutations in this
 milestone. Disabled apps can still be managed by their owner. Specify atomic
 callback changes versus in-flight flows before implementation; a removed callback
 must not be used for a later redirect/exchange. Durable disablement must remain
-effective through PostgreSQL state checks and transaction locking coordinated
-with exchange and refresh; cleanup alone is insufficient.
+effective across PostgreSQL app state and Redis refresh state, including
+concurrent requests, Redis failure and later re-enablement. Choose the state-check
+and invalidation mechanism before implementation; cleanup alone is insufficient.
 
-## Rust session transaction boundaries
+## Rust session storage boundaries
 
-Rust owns exchange, refresh, revocation and JWT signing. PostgreSQL is the
-authoritative refresh store; no separate Go service or Redis contract is needed.
-Validate user/client/family bindings server-side. Specify transaction isolation,
-record locking, constraints, signing failures and ambiguous commit outcomes
-before implementation. Follow Architecture's exchange and refresh rules.
+Rust owns exchange, refresh, revocation and all JWT signing. PostgreSQL stores
+authorization codes and durable app/account configuration; Redis is authoritative
+for refresh sessions. Go is not required. Validate user/client/family bindings
+server-side. Define cross-store exchange failures, atomic Redis operations,
+signing failures, ambiguous writes and disablement enforcement before implementation.
 
 ## Review and validation
 
 Before endpoint implementation, review proposed headers, paths, error mapping and
-session transaction boundaries and commit-failure behavior. Before deployment, choose numeric rate limits,
+cross-store exchange policy and session-failure behavior. Before deployment, choose numeric rate limits,
 request sizes, proxy trust, password dataset/costs, CSRF mechanics, cookie names,
-PostgreSQL restore invalidation, database durability and JWKS cache settings.
+Redis persistence/capacity/restore invalidation, PostgreSQL recovery and JWKS cache settings.
 Use Architecture's first-milestone acceptance checks as behavioral verification.
 Billing and profile features can be specified later. Add OpenAPI after these
 request/response shapes stabilize.
