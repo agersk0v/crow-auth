@@ -199,7 +199,10 @@ for enforcement and [API contract](API_CONTRACT.md) for proposed wire formats.
 - Owners can disable and re-enable applications; permanent deletion is deferred.
   Disablement blocks new authorizations, code exchanges, refresh and app-token
   access to Crow APIs, and revokes existing refresh families. Re-enabling cannot
-  restore revoked sessions. Existing JWTs can remain usable at app APIs until expiry.
+  restore revoked sessions. Each disablement increments a durable app session
+  version; refresh families keep their original version and mismatches are
+  rejected. Redis cleanup failure cannot revive old families after re-enablement.
+  Existing JWTs can remain usable at app APIs until expiry.
 - Every refresh authenticates client credentials and reads current app enabled
   state directly from PostgreSQL, without a Redis app-status cache. If this
   check is unavailable, refresh fails temporarily and returns no tokens.
