@@ -179,6 +179,9 @@ for enforcement and [API contract](API_CONTRACT.md) for proposed wire formats.
   or registration creates a portal session, with an absolute eight-hour expiry.
 - Authorization codes expire 60 seconds after issuance. PKCE S256 and client
   authentication are required. Pending browser-bound flows expire after 15 minutes.
+- Code exchange consumes the code once before creating its Redis session.
+  Failure after consumption, an uncertain write outcome, or a lost successful
+  response requires a fresh hosted login. Consumed codes are never restored.
 - Require HTTPS callbacks except HTTP on exact `localhost` or `127.0.0.1` hosts.
   Match complete registered URLs exactly, including path, query and port; reject
   fragments and wildcards. The actual production domain remains undecided.
