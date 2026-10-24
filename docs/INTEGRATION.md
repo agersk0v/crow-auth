@@ -28,9 +28,10 @@ flow, PKCE S256, query response mode and scopes `openid profile`.
 No custom Crow SDK, password forwarding or refresh-token handler is needed.
 
 Your backend must retain per-transaction state, nonce, PKCE verifier, requested
-freshness and start time, bound to the initiating browser session. Generate them
-with secure randomness. Do not keep a single global verifier or overwrite another
-tab's pending transaction. Expire and consume each transaction once.
+freshness and start time, bound to the initiating browser session. Generate state,
+nonce and the PKCE verifier with secure randomness; record the actual request
+start time for freshness validation. Do not keep a single global verifier or
+overwrite another tab's pending transaction. Expire and consume each transaction once.
 
 ## Complete sign-in
 
@@ -54,6 +55,41 @@ tab's pending transaction. Expire and consume each transaction once.
 Never link existing accounts by username. Subjects differ across sectors and may
 be shared across clients in the same sector. Changing callback hostname requires
 a new app and an explicit identity migration on your side.
+
+## Keep credentials in the right place
+
+| Value | Destination | Handling |
+| --- | --- | --- |
+| Issuer and client ID | Library configuration and authorization request as applicable | Public identifiers; pin the trusted issuer in server configuration |
+| Client secret | Backend authentication at the discovered token endpoint | Secret store; never an authorization URL or browser form |
+| State and nonce | Authorization request and server-side pending transaction | Bind to the initiating browser and validate the returned state/ID-token nonce |
+| PKCE challenge | Authorization request | Derive from the transaction's verifier using S256 |
+| PKCE verifier | Backend code exchange and pending transaction | Never include in the authorization URL |
+| Authorization code | Callback, then backend exchange | Short-lived and single-use; exclude callback queries from logs |
+| ID token | Backend OIDC validation | Establish identity only after all validation succeeds |
+| Access token | Backend call to UserInfo in the Bearer header | Opaque; do not put in query strings or use for your app's APIs |
+| Local session handle | Your app's protected browser cookie | Your app controls session expiry, logout and CSRF protection |
+
+The [API contract](API_CONTRACT.md#authorization) defines exact request fields and
+[token response examples](API_CONTRACT.md#exchange). These examples describe the
+future protocol; they cannot be exercised against the current skeleton.
+
+## Diagnose integration failures
+
+These are planned protocol outcomes, not routes available today. Keep diagnostic
+logs to safe error codes and request IDs, without raw request URLs or credentials.
+
+| Outcome | Action |
+| --- | --- |
+| Local Crow error before callback | Check enabled client and exact registered callback, including scheme, hostname, port, path and query |
+| `invalid_scope` | Request only `openid` and optional `profile`; no email, subscription or offline-access scope |
+| `access_denied` | End the pending transaction and let the user choose whether to start again |
+| `login_required` or `consent_required` with `prompt=none` | Start a new interactive authorization if the user chooses to continue |
+| Token endpoint `invalid_client` | Check client ID, active secret and library support for `client_secret_basic` with OAuth credential encoding |
+| Token endpoint `invalid_grant` | Start new authorization; inspect callback/verifier binding and code expiry without logging their values |
+| State, issuer, nonce, signature, audience or UserInfo subject mismatch | Reject sign-in; inspect trusted library configuration and transaction binding; never disable the failing check |
+| Unknown signing-key `kid` | Use the library's bounded refresh of the trusted issuer's JWKS; reject if no trusted matching key exists |
+| Timeout, HTTP 503 or lost exchange response | Show login unavailable or start fresh authorization; do not replay the code automatically |
 
 ## Sessions and failures
 

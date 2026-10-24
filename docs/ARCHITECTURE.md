@@ -59,8 +59,9 @@ Issue a random anonymous browser session and synchronizer CSRF token before
 login/registration. Bind authenticated CSRF tokens to their current session.
 All form mutations, including login, require both CSRF verification and exact
 configured Origin validation; reject absent or unexpected Origin. Rotate CSRF
-state with session replacement. Email-link GETs render a confirmation form; only
-protected POSTs consume credentials or change account state.
+state with session replacement. Email-link GETs stage the credential and redirect
+to a clean confirmation page under the [browser route contract](API_CONTRACT.md#browser-routes); only protected
+POSTs consume credentials or change account state.
 
 Escape templates, disallow framing, set a restrictive content security policy,
 use no-store for sensitive pages/responses and a no-referrer policy for credential

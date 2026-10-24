@@ -6,7 +6,7 @@ Implemented: Rust/Axum/Tokio startup, SQLx PostgreSQL pool, startup `SELECT 1`,
 loopback listener and `/health`. Two tests cover missing database configuration
 and credential-safe startup failure. Successful database/HTTP smoke evidence is
 not recorded here. Everything below is planned; no authentication milestone is
-complete. This documentation rewrite does not change executable behavior.
+complete. See [local development](DEVELOPMENT.md) for reproducible setup and checks.
 
 ## Build order
 

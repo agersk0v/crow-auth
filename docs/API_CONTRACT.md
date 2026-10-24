@@ -11,6 +11,14 @@ Only confidential web clients are supported. There is no password grant, implici
 flow, client-credentials grant, refresh grant, dynamic registration, introspection,
 revocation or OIDC logout endpoint. Unsupported features are not advertised.
 
+## Current HTTP endpoint
+
+`GET /health` returns HTTP 200 with plain-text body `ok` after successful startup.
+It performs no per-request database check and requires no authentication. This
+is the only implemented route. See [local development](DEVELOPMENT.md) for setup
+and [Operations](OPERATIONS.md#configuration-and-release) for planned readiness.
+All remaining sections of this contract describe planned behavior.
+
 ## Discovery
 
 Use one configured HTTPS issuer with no query or fragment and no trailing slash;
@@ -81,7 +89,10 @@ Reject duplicate parameters and malformed supported values. Unknown extension
 parameters are ignored as required by OAuth; recognized unsupported features
 such as request objects are rejected with the applicable standard error.
 Unknown scopes, including `offline_access`, return `invalid_scope`.
-PKCE syntax follows RFC 7636; plain challenges are unsupported.
+Validate challenge syntax at authorization. At exchange, validate verifier syntax
+and compare `BASE64URL(SHA256(ASCII(code_verifier)))`, without padding, with the
+stored challenge, as specified in RFC 7636. Plain challenges are unsupported;
+never send `code_verifier` in the authorization URL.
 
 Validate client and callback before any redirect. Invalid client/callback produces
 a local error. Other errors use standard OAuth/OIDC error parameters at the
@@ -235,3 +246,19 @@ Show plaintext secrets once in a no-store response after confirmed commit; do no
 put them in redirects, logs or persistent flash messages. If the response is lost,
 revoke that secret and create another. Disabled apps remain manageable by owners.
 There is no app deletion, ownership transfer or API-based registration contract.
+
+## Standards references
+
+These references define protocol behavior; the sections above narrow the
+supported feature set. Listing a standard does not claim full implementation or
+certification.
+
+| Standard | Used for |
+| --- | --- |
+| [OpenID Connect Core 1.0](https://openid.net/specs/openid-connect-core-1_0.html) | Code flow, ID-token validation, subjects, prompts and UserInfo |
+| [OpenID Connect Discovery 1.0](https://openid.net/specs/openid-connect-discovery-1_0.html) | Issuer metadata and signing-key discovery |
+| [OAuth 2.0, RFC 6749](https://www.rfc-editor.org/rfc/rfc6749.html) | Authorization requests, code exchange, client authentication and errors |
+| [OAuth security best current practice, RFC 9700](https://www.rfc-editor.org/rfc/rfc9700.html) | Security requirements for the supported flow |
+| [PKCE, RFC 7636](https://www.rfc-editor.org/rfc/rfc7636.html) | S256 challenge and verifier syntax and validation |
+| [Bearer token usage, RFC 6750](https://www.rfc-editor.org/rfc/rfc6750.html) | UserInfo authorization and error challenges |
+| [Authorization response issuer, RFC 9207](https://www.rfc-editor.org/rfc/rfc9207.html) | Callback issuer identification and validation |
