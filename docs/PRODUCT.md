@@ -42,10 +42,10 @@ not implemented yet. All following feature sections describe planned behavior.
 ## Shared accounts and application data
 
 Initial registration and sign-in use simple usernames and passwords; no email,
-social login, or additional account factors are required initially. Exact username
-characters, lengths, normalization, and password limits still need definition.
-The same Crow
-account and stable user ID work across connected applications; visiting a second
+social login, or additional account factors are required initially. Usernames are
+3–32 ASCII letters, digits, or underscores, with case-insensitive uniqueness.
+Passwords are 15–128 characters, allow spaces, and have no mandatory character
+combinations; they are hashed with Argon2id. The same Crow account and stable user ID work across connected applications; visiting a second
 application does not require another Crow registration.
 
 Applications obtain the authenticated user's ID through validated tokens or an
@@ -55,8 +55,10 @@ another app stores its own data against that same ID. Crow Auth does not store
 those applications' business data.
 
 Shared identity does not grant access to another application's data or developer
-configuration. Only the user information permitted for an integration may be
-exposed; the exact profile fields and access rules remain to be defined.
+configuration. Connected apps receive the user UUID and username. Subscriber
+status is available through an authenticated account API rather than embedded
+in access tokens. Each app may read only the permitted information for its
+authenticated user, not arbitrary users or another developer’s configuration.
 
 ## Developers and application registration
 
@@ -132,10 +134,11 @@ not accept a callback or redirect tokens to a URL.
 Applications that collect Crow credentials directly handle those credentials;
 Crow's hosted login avoids exposing passwords to a connected application's
 login form. Direct username/password login is allowed only for authenticated
-backend applications. Browser applications use hosted login with PKCE and must
-not receive backend client secrets. The client authentication mechanism and
-credential provisioning remain to be defined. A public client ID alone must not
-authorize tokens for that client.
+backend applications using a client ID and randomly generated client secret.
+Browser applications use hosted login with PKCE and must not receive backend
+client secrets. Allow up to two active secrets during rotation so the developer
+can deploy a replacement before revoking the old secret. A public client ID alone
+must not authorize tokens for that client.
 
 The exact endpoint paths, request/response payloads, and error contracts are not
 yet defined. `/login` above identifies the hosted page, not a finalized API route.
@@ -175,19 +178,25 @@ The main authentication API uses Rust and Axum. A Go microservice in this same
 repository handles refresh tokens using Redis for refresh-token state.
 PostgreSQL stores persistent identity, application, and subscription data.
 
-Access tokens expire 10 minutes after issuance. Refresh-token expiry remains
-undefined; this access-token lifetime does not remove the Go/Redis refresh flow.
-Signing-key rotation, refresh rotation and expiry, service communication, Redis
-persistence/outage behavior, and logout/revocation rules remain to be defined.
-Logout must be supported, but its exact scope and effect
-on already-issued JWTs are not yet agreed.
+Access tokens expire 10 minutes after issuance. Refresh sessions expire after
+7 days of inactivity or 30 days from their original creation, whichever comes
+first. Every successful refresh replaces the refresh token; reuse revokes that
+session’s token family. Clients must coordinate concurrent refresh attempts.
+Redis data loss invalidates affected refresh sessions and requires login again;
+already-issued access tokens expire normally.
+
+Support both signing out of the current session and signing out of all sessions.
+Revoke the affected refresh and Crow browser sessions; already-issued access
+tokens remain usable until their normal expiry. Global logout does not require
+connected APIs to make an online revocation check for every request.
 
 Shared accounts are required, but single sign-on is outside the initial scope.
 Each new hosted application authorization requires username/password entry, even
 if the user is signed into Crow or another connected application. A Crow account
 page session must not silently authenticate the user to a connected app. Refreshing
 an existing application session is separate from cross-application single sign-on.
-Crow account-session duration, consent, and logout scope still need definition.
+A Crow account/developer-page session lasts up to 8 hours after sign-in. Consent
+requirements and the exact browser-session storage remain to be defined.
 
 ## Subscriptions and roles
 
@@ -197,17 +206,24 @@ subscriber role associated with the Crow identity. All features remain unlocked;
 there is no initial paid-feature gating, plan-based access restriction, or paid
 API limit.
 
+Assign the subscriber role automatically from verified Stripe events once the
+eligible subscription states have been defined. Cancellation preserves the role
+until the paid period ends. A failed payment starts a 7-day grace period during
+which subscriber status is retained; an unresolved failure removes the role at
+the end of that period. An account without subscriber status does not gain it
+merely because a payment failed. Duplicate failure events must not restart grace.
+Applications read current locally recorded subscriber status through the
+authenticated account API, not a possibly stale JWT claim.
+
 The following remain unresolved:
 
 - Who purchases subscriptions and how Stripe customers map to Crow accounts.
-- Whether the subscriber role is assigned automatically from Stripe, manually,
-  or through both mechanisms.
+- Eligible Stripe states and precedence between cancellation and payment failure.
 - Pricing, plans, trials, and purchase or billing-management interfaces.
-- Cancellation, failed-payment, refund, and subscription-expiry behavior.
-- How applications read the subscriber role and when changes become visible.
+- Refunds, reinstatement after payment recovery, and webhook reconciliation.
 
 Stripe Checkout and Customer Portal are options, not agreed requirements. Do not
-invent subscription lifecycle rules or role transitions during implementation.
+invent additional subscription lifecycle rules or role transitions during implementation.
 
 ## Agreed technology constraints
 
@@ -245,14 +261,13 @@ decisions. The subscriber role remains in scope.
 Resolve decisions for an affected feature before implementing it. Independent
 work within agreed scope can continue.
 
-1. Simple username normalization/uniqueness and password limits, plus permitted
-   profile fields and edits; email is not initially required.
-2. Backend client authentication and credential provisioning, user-information
-   access, and any consent requirements.
-3. Detailed callback rules, authorization-code contracts, and PKCE/state handling.
-4. Refresh-token/code lifetimes, refresh rotation, Crow account-page sessions,
-   signing-key management, service boundaries, and logout/revocation behavior.
-5. Subscription purchasing, subscriber-role assignment, and billing lifecycle.
+1. Permitted profile edits; email is not initially required.
+2. Client-secret provisioning/revocation interfaces and any consent requirements.
+3. Detailed callback rules, authorization-code expiry/contracts, and PKCE/state handling.
+4. Crow session storage/cookie details, signing-key management, and cross-service
+   failure handling for refresh and logout.
+5. Subscription purchasing, eligible Stripe states, remaining lifecycle rules,
+   and reconciliation. The cancellation and failed-payment policies above are agreed.
 
 Update this document when product decisions change and when planned features
 become implemented. Keep setup instructions in the README and technical details

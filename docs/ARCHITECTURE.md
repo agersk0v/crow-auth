@@ -77,7 +77,8 @@ or profile fields without a corresponding product decision.
 Use PostgreSQL constraints for identity uniqueness and application ownership
 relationships. Store user IDs as PostgreSQL UUIDs and serialize them as UUID
 strings in JWT `sub` and API responses. UUID generation/version and username
-normalization remain to be selected before the first user migration. Keep initial
+normalization must implement case-insensitive uniqueness for ASCII usernames;
+UUID generation/version remains to be selected before the first user migration. Keep initial
 credentials to simple usernames and passwords, without requiring an email address.
 A username is mutable display/login data only if editing
 is later approved; it must never substitute for the stable ID.
@@ -100,9 +101,9 @@ to Crow itself and leads to `/account`. Account and application-management APIs
 require Crow-scoped authentication, not a JWT intended for an arbitrary connected
 application. Only an application's owner may manage it.
 
-Recommended browser handling uses secure, HttpOnly cookies for the Crow session.
-Define cookie scope, SameSite behavior, CSRF protection, expiry, and session
-storage before implementing this flow. The cookie authenticates Crow account and
+Use secure, HttpOnly cookies for the Crow session, with a server-enforced
+maximum duration of 8 hours from sign-in. Define cookie scope, SameSite behavior,
+CSRF protection, and session storage before implementing this flow. The cookie authenticates Crow account and
 developer pages only; it must not bypass credentials in a new application login.
 Single sign-on is outside the initial scope. Never allow an arbitrary internal
 post-login destination to become an open redirect.
@@ -144,10 +145,14 @@ handles the user's Crow password. Hosted login avoids that exposure.
 A public client ID, CORS header, or claimed origin is not client authentication.
 Direct username/password login is restricted to authenticated backend
 applications. Browser applications use hosted authorization-code login with PKCE.
-Do not expose backend client secrets to browsers. The backend authentication
-mechanism and credential provisioning remain unresolved. Do not ship an endpoint
-that accepts any client ID as authorization
-to issue tokens for that client.
+Authenticate backend applications using a client ID and a randomly generated
+client secret. Do not expose backend client secrets to browsers. Store secret
+verifiers rather than recoverable raw secrets and show a new secret only at
+issuance. Permit at most two active secrets during rotation: provision the new
+secret, deploy it, then explicitly revoke the old one. Secret-management APIs
+require application-owner authentication. Secret transport and provisioning
+contracts still need definition. A public client ID alone never authorizes token
+issuance for that client.
 
 ## Planned API capabilities
 
@@ -159,12 +164,12 @@ Only the existing `GET /health` is an implemented HTTP contract.
 | Account registration | Validate agreed username/password rules and create one Crow identity |
 | Direct login | Authenticate the user and permitted client; return audience-bound tokens |
 | Hosted transaction / code exchange | Validate client, callback, state binding, and PKCE; exchange a single-use code |
-| Account read | Return permitted identity/subscriber information under an explicitly defined access policy |
+| Account read | Return the authenticated user’s UUID, username, and current locally recorded subscriber status; no arbitrary-user lookup |
 | Application management | Crow-authenticated owner creates, lists, and updates owned applications/callbacks |
 | Refresh | Rust public entry point delegates refresh-state decisions to Go and signs the resulting access token |
-| Logout | Revoke the relevant refresh/browser session according to the still-pending logout scope |
+| Logout | Support current-session and all-session refresh/browser revocation; access JWTs expire naturally |
 | Public signing keys | Publish verification keys, never signing secrets |
-| Stripe webhook | Verify Stripe's signature and process events idempotently; role transitions await billing rules |
+| Stripe webhook | Verify signatures and process events idempotently; apply the agreed role policies once eligible states are defined |
 
 Define paths, body limits, content types, validation rules, status codes, and a
 consistent JSON error format in implementation issues before callers depend on
@@ -175,11 +180,17 @@ OpenID Connect compliance without implementing and testing the relevant standard
 
 ### Credentials and request protection
 
-Use a maintained password-hashing implementation; Argon2id with unique salts is
-the recommended choice, with parameters benchmarked before implementation.
-Never store plaintext passwords or reversible password encryption. Define
-password/username rules, bounded hashing concurrency, request size limits, and
-account/IP rate limits before exposing registration and login publicly.
+Usernames contain 3–32 ASCII letters, digits, or underscores. Enforce uniqueness
+case-insensitively in PostgreSQL as well as validation; an ASCII lowercase lookup
+key is a suitable implementation. Define display casing before supporting edits.
+Passwords contain 15–128 characters, permit spaces, and have no required character
+combinations. Do not silently truncate or trim passwords. Define consistent
+character-counting semantics for frontend/backend validation.
+
+Hash passwords with a maintained Argon2id implementation and unique salts;
+benchmark parameters before implementation. Never store plaintext passwords or
+reversible password encryption. Define bounded hashing concurrency, request size
+limits, and account/IP rate limits before exposing login publicly.
 
 Return generic invalid-login responses rather than exposing account existence.
 Never log passwords, raw tokens, authorization codes, connection strings, or
@@ -197,8 +208,12 @@ JWTs identify Crow as `iss`, the immutable UUID user ID as `sub`, and the intend
 application as `aud`. Set expiry to 10 minutes (600 seconds) after issuance
 (`exp = iat + 600`). Receiving APIs must verify the signature with an allowlisted algorithm, issuer, audience, and time validity.
 They must reject another application's token, even when `sub` names the same user.
-Access tokens should contain minimal identity data; subscriber claims and their
-freshness remain undefined. JWT claims are readable, not encrypted secrets.
+Access tokens contain the user UUID and username alongside validation claims.
+Do not include subscriber status in JWTs. Applications read the current locally
+recorded status through an authenticated account API for the token’s subject;
+validate that the requesting application audience is permitted for that operation.
+A connected-app token must not authorize Crow developer-management operations.
+JWT claims are readable, not encrypted secrets.
 
 Publish public keys with key IDs and support overlapping verification keys during
 rotation. Private signing keys remain outside Git and frontend bundles. Define
@@ -220,15 +235,30 @@ affected family; storing only the newest token would lose that evidence.
 The user and audience are bound to server-side state, never selected freely
 by a refresh caller. Rust signs the access token using the trusted result.
 
-Define retry/concurrency behavior and lost-response handling before implementing
-rotation. Redis updates and JWT signing are not one cross-service transaction;
-the failure contract must not accidentally permit replay or unlimited reissuance.
-Specify absolute/idle expiry, TTLs, and consumed-history retention together.
+Refresh sessions have a 7-day idle timeout and a 30-day absolute maximum from
+initial issuance. A successful rotation renews the idle deadline without moving
+the absolute deadline. Each refresh token is single-use; detected reuse revokes
+its session family. Clients must serialize refresh attempts. There is no retry
+grace window; a lost successful response may require fresh login.
+
+Retain consumed-token evidence through the family’s absolute lifetime, even
+after rotation, so reuse remains detectable. Redis updates and JWT signing are
+not one cross-service transaction; define safe response-loss/failure handling
+without bypassing single-use checks or permitting unlimited reissuance.
 
 If Redis or Go is unavailable, refreshing must fail without inventing a session
 or skipping validation. Existing locally validated JWTs can remain valid until
-expiry. Redis persistence/recovery and how Go learns about account/application
-changes must be defined before relying on durable revocation guarantees.
+expiry. If Redis loses session data, affected refresh sessions are invalid and
+users must log in again. Missing state never permits refresh. Do not restore
+stale token state in a way that resurrects consumed or revoked tokens. How Go
+learns about account/application changes still needs an internal contract.
+
+Support current-session logout and all-session logout. Revoke the corresponding
+refresh families and Crow browser sessions. Client-secret rotation does not
+implicitly change a user’s password or global identity. Account for races between
+refresh and logout so a concurrent refresh cannot escape revocation. Connected
+APIs need not perform online revocation checks; existing access JWTs remain
+valid until their normal 10-minute expiry.
 
 ## Subscriptions
 
@@ -237,10 +267,19 @@ boundary. Verify webhook signatures against the raw request body, deduplicate
 event IDs, and make database updates idempotent. Browser success redirects alone
 must not grant a subscriber role. Stripe credentials remain server-side.
 
-Customer ownership, role assignment, payment failure, cancellation, refunds,
-out-of-order events, and reconciliation need billing decisions before concrete
-transitions are implemented. All features remain unlocked initially; no billing
-failure should silently introduce an unapproved feature restriction.
+Subscriber-role assignment is automatic from verified Stripe events. Eligible
+Stripe states and customer-to-account ownership still require a billing decision.
+Cancellation preserves existing subscriber status through the paid period. A
+failed payment preserves existing subscriber status for a 7-day grace period;
+an unresolved failure removes it at the deadline. Duplicate/retried events must
+not reset grace or grant a role that was not already held. Define lifecycle
+precedence for overlapping cancellation/failure events before implementation.
+
+Persist paid-through and grace deadlines and evaluate them through a reliable
+expiry mechanism; do not assume Stripe will send an event at every local deadline.
+Account reads return current locally recorded status instead of a JWT snapshot.
+Refunds, recovery after payment, out-of-order reconciliation, and pricing remain
+undefined. All features stay unlocked; subscriber status does not gate access.
 
 ## Runtime, failures, and validation
 
@@ -279,15 +318,16 @@ do not claim nonexistent test commands or suites pass.
 
 Before implementing each affected feature, settle:
 
-1. Simple username/password rules and limits, profile edits, and UUID generation.
-2. Backend client authentication and credential provisioning, user-data access,
-   and consent. Direct password login eligibility is already backend-only.
-3. Crow account-session storage/duration, cookie rules, and logout scope. No SSO
-   is included in the initial scope.
-4. Refresh-token/code lifetimes, signing algorithm/keys, refresh retry semantics, and
-   Redis durability and recovery.
+1. Profile edits, username display casing, consistent password character counting,
+   UUID generation, and Argon2id parameters/rate limits.
+2. Backend secret provisioning, revocation, and transport contracts, and consent.
+3. Crow browser-session storage, cookie/CSRF details, and atomic logout/refresh
+   coordination. The 8-hour duration and both logout scopes are agreed; no SSO.
+4. Authorization-code lifetime, signing algorithm/keys, cross-service failure
+   contracts, and prevention of stale-state resurrection during Redis recovery.
 5. Migration tooling, service layout/contracts, and deployment/routing details.
-6. Subscription ownership, role assignment, billing lifecycle, and reconciliation.
+6. Subscription ownership, eligible states, lifecycle precedence, refunds, payment
+   recovery, reconciliation, pricing, and billing interfaces.
 
 The recommendations in this document provide a reviewable direction. They do
 not silently convert these open choices into implemented product requirements.
