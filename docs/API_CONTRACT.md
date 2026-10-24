@@ -132,12 +132,15 @@ fails. Define signing order and cleanup details before implementation.
 ### Refresh: POST /api/token/refresh
 
 Require client headers and `{"refresh_token":"<opaque-token>"}`. Validate client,
-enabled state and ownership. Rust uses an atomic Redis operation/script to
+enabled state and ownership. On every refresh, authenticate the client and
+read current enabled state directly from PostgreSQL, without a Redis app-status
+cache. Return 503 if that check is unavailable, before consuming or rotating the
+refresh token; disabled apps are rejected. Rust uses an atomic Redis operation/script to
 validate and consume the token, create its successor and update the family.
 Return the same success shape as exchange only after signing succeeds and the
 Redis update is confirmed. Family revocation on reuse must take effect despite
-returning invalid_grant. Define signing/write ordering and durable app-state
-checks before implementation.
+returning invalid_grant. Define signing/write ordering and coordination with
+concurrent app disablement before implementation.
 Preserve original 30-day deadline and update seven-day idle expiry. Expiry,
 revocation or reuse yields invalid_grant; reuse also revokes the whole family.
 Dependency failure yields 503 without granting access. **Never automatically retry
@@ -206,8 +209,9 @@ milestone. Disabled apps can still be managed by their owner. Specify atomic
 callback changes versus in-flight flows before implementation; a removed callback
 must not be used for a later redirect/exchange. Durable disablement must remain
 effective across PostgreSQL app state and Redis refresh state, including
-concurrent requests, Redis failure and later re-enablement. Choose the state-check
-and invalidation mechanism before implementation; cleanup alone is insufficient.
+concurrent requests, Redis failure and later re-enablement. Refresh checks
+PostgreSQL directly on every request. Define race coordination and durable
+session invalidation before implementation; cleanup alone is insufficient.
 
 ## Rust session storage boundaries
 
