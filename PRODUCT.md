@@ -14,3 +14,8 @@ Each app manages its own data, permissions and local sessions.
 Keep the product small enough for one maintainer to operate.
 
 These are product goals. Authentication and app management are not implemented yet.
+
+The [first milestone specification](docs/PRODUCT.md) defines the accepted planned
+account lifecycle, shared sign-in and app management behavior. The
+[implementation checklist and acceptance criteria](docs/IMPLEMENTATION.md) track
+the two-app milestone and later features separately.

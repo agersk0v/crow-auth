@@ -11,3 +11,8 @@ The service currently checks database connectivity at startup and exposes
 
 Hosted account pages, app management and OpenID Connect are planned to live in
 the same service. Add structure as features need it; keep the design simple.
+
+The [milestone security design](docs/ARCHITECTURE.md) defines planned trust
+boundaries, sessions and transaction requirements. The
+[API contract](docs/API_CONTRACT.md) owns protocol details. Neither document
+implies that these authentication features are implemented.
