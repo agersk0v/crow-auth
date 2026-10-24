@@ -6,7 +6,8 @@ engine using maintained protocol and cryptographic libraries. Apps use Crow-host
 OAuth 2.0 Authorization Code Flow with PKCE S256 and OpenID Connect (OIDC).
 Every integrating app initially needs a backend that can keep a client secret.
 
-All behavior here is planned. [README](../README.md) owns runnable status and setup;
+**Accepted:** all behavior here is planned unless labeled otherwise.
+Decision labels are defined in [AGENTS.md](../AGENTS.md). [README](../README.md) owns runnable status and setup;
 this document owns product behavior and lifetimes;
 [Architecture](ARCHITECTURE.md) owns security enforcement;
 [Implementation](IMPLEMENTATION.md) owns completion evidence;
@@ -36,9 +37,10 @@ address changes, single-use expiring reset links, abuse protection, generic rese
 responses and session invalidation after reset. Never trust an unverified address
 or silently attach one during a forgotten-password request.
 
-Expose pairwise opaque OIDC subjects: the same account receives a different stable
-`sub` for each sector. Apps in the same sector share a subject. Subjects must not reveal or permit derivation of the
-internal UUID. Do not use usernames or email addresses as subjects. The API contract defines sectors; Architecture owns subject mapping and storage.
+Subjects must not reveal or permit derivation of the internal UUID; usernames and
+email addresses are not subjects. The [API contract](API_CONTRACT.md#pairwise-subject-sectors)
+defines sectors; [Architecture](ARCHITECTURE.md#accounts-identifiers-and-secrets)
+owns subject mapping and storage.
 
 ## Login and consent
 
@@ -50,8 +52,13 @@ internal UUID. Do not use usernames or email addresses as subjects. The API cont
    consent and returns a single-use code and original state to the exact callback.
 4. The backend checks state, exchanges the code at `/oauth/token`, validates the
    ID token and uses its `sub` as the app-specific identity for its local account/session.
-5. Access tokens authorize Crow APIs; refresh tokens extend the app session
-   when offline access was granted. ID tokens never authorize API requests.
+5. Access tokens authorize Crow APIs. ID tokens never authorize API requests.
+   **Deferred:** refresh tokens extend access when offline access is introduced.
+
+The first complete integration includes hosted login, consent, discovery, code
+exchange, ID tokens and UserInfo. It issues no refresh tokens and does not support
+`offline_access`; apps repeat authorization when new Crow tokens are needed.
+Refresh and subscription reads are later milestones, independently of billing.
 
 Apps must not collect or forward Crow passwords. There is no app-facing password
 grant or registration API. “Continue with Crow” branding is optional.
@@ -63,26 +70,22 @@ and refresh families remain separate. Consent is still required as documented be
 Remembered consent alone never authenticates a user. Invalid or expired app flows
 never silently become portal login.
 
-`prompt=login` and `max_age=0` require fresh authentication. Other `max_age` values
-require it when the original authentication is too old. Reusing a session does not
-reset its authentication time or eight-hour absolute deadline. `prompt=consent`
-forces consent. With `prompt=none`, return a code only if the session, freshness
-and all consent requirements are already satisfied; otherwise return login_required
-or consent_required without displaying UI. Silent requests never create a new
-offline-access grant that requires explicit consent.
+SSO reuse preserves the original authentication time and browser-session deadline.
+Apps can request fresh authentication, forced consent or a silent result using
+[API prompt and freshness rules](API_CONTRACT.md#authorization-get-oauthauthorize).
 
 Consent shows requested permissions, app name and destination domain without
 implying endorsement. Remember ordinary consent by user, app and permission
-version; ask again when permissions expand. Offline access requires explicit
-consent for each new grant. Decline consumes the flow and returns access_denied
+version; ask again when permissions expand. **Deferred:** offline access requires explicit
+consent for each new grant once supported. Decline consumes the flow and returns access_denied
 and state only to a validated callback. A newly registered account remains created.
 
 | Scope | Permission |
 | --- | --- |
 | `openid` | Sign in and receive a pairwise opaque subject as `sub` |
 | `profile` | Receive username as `preferred_username` |
-| `crow.subscription` | Read the current user's subscription status |
-| `offline_access` | Receive rotating refresh tokens after explicit consent |
+| `crow.subscription` (**Deferred**) | Read the current user's subscription status |
+| `offline_access` (**Deferred**) | Receive rotating refresh tokens after explicit consent |
 
 The [API contract](API_CONTRACT.md) defines prompt behavior and supported features.
 Google/Discord login options are separate future integrations.
@@ -138,20 +141,20 @@ an app's own APIs under the initial Crow resource-token contract.
 
 | Credential or flow | Lifetime |
 | --- | --- |
-| Access JWT | 10 minutes; Crow resource API audience |
+| Opaque access token | 10 minutes; Crow resource APIs |
 | OIDC ID token | 10 minutes; integrating client audience |
-| Refresh family | 7 days idle or 30 days total, whichever is first |
+| Refresh family (**Deferred**) | 7 days idle or 30 days total, whichever is first |
 | Crow browser session (SSO and portal) | 8 hours absolute |
 | Pending hosted flow | 15 minutes |
 | Authorization code | 60 seconds after issuance |
 
 Backends retain tokens in protected server storage; browsers receive a random
-app-session cookie handle. Refresh tokens rotate. Duplicate/retry handling is
-unresolved; strict family revocation on every duplicate is not an accepted rule.
-Resolve the replacement policy before implementing refresh, including concurrency,
-theft detection and lost responses. Architecture owns that decision gate.
+app-session cookie handle. **Deferred:** refresh tokens rotate;
+[Architecture](ARCHITECTURE.md#refresh-and-revocation) owns enforcement and the
+unresolved retry policy.
 
-App logout revokes its current refresh family and clears local state. Other apps
+App logout clears local state and, once refresh is supported, revokes its current
+refresh family. Other apps
 and devices remain signed in. Portal logout invalidates the current Crow browser
 session, ending SSO in that browser, but does not revoke existing app sessions
 or refresh families. App logout does not end the Crow browser session; signing
@@ -174,7 +177,7 @@ Before billing implementation, define purchaser/customer ownership, eligible
 states, plans/prices/trials, interfaces, refunds, payment recovery, lifecycle
 precedence, webhook idempotency and reconciliation. Billing does not block auth.
 
-External/social/passwordless login, MFA, email recovery, profile/password changes,
+**Deferred:** external/social/passwordless login, MFA, email recovery, profile/password changes,
 account deletion, organizations/teams, app business roles, paid feature gating,
 embedded components and a broad admin dashboard are deferred. Define their
 contracts before exposure. Clerk/Google feature parity is not a requirement.
@@ -184,9 +187,11 @@ contracts before exposure. Clerk/Google feature parity is not a requirement.
 1. Accounts, migrations and shared Crow browser sessions for portal and SSO.
 2. Owned app registration, callbacks and secret management.
 3. Hosted authorization, registration and consent.
-4. Discovery, code exchange, ID/access tokens and UserInfo.
-5. Refresh, revocation, disablement and subscription reads.
-6. Integration/conformance checks and deployment hardening.
+4. Discovery, code exchange, ID/opaque access tokens and UserInfo; verify a
+   complete integration with a standard OIDC client, without refresh.
+5. Resolve the refresh policy, then implement refresh/revocation and subscription
+   reads. App disablement enforcement accompanies every supported operation.
+6. Extend integration/conformance checks and complete deployment readiness.
 
 [Implementation milestones](IMPLEMENTATION.md) define completion evidence.
 Security controls belong with each feature, not in a final hardening pass.

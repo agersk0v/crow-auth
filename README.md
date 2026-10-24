@@ -10,8 +10,9 @@ backend-only app integrations and a separate account/developer portal.
 Crow implements its own engine. Axum serves templates with HTMX enhancements
 and owns authentication and token signing; apps receive pairwise opaque subjects.
 PostgreSQL stores accounts,
-authorization flows, portal sessions and refresh sessions. Refresh rotation and
-revocation use database transactions.
+authorization flows, portal sessions and access-token grants. Access tokens are opaque; ID tokens are signed JWTs.
+The first complete OIDC integration excludes refresh/offline access; refresh
+sessions and transactional rotation belong to a later milestone.
 
 - [Product behavior](docs/PRODUCT.md)
 - [Architecture and security](docs/ARCHITECTURE.md)
@@ -21,6 +22,7 @@ revocation use database transactions.
 
 OAuth/OIDC endpoints, discovery and authentication are not implemented yet.
 These describe planned behavior; the runnable implementation remains the skeleton below.
+Decision labels are defined in [AGENTS.md](AGENTS.md).
 
 ## Development
 

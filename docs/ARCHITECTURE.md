@@ -6,8 +6,8 @@ Planned design; [README](../README.md) owns implemented status.
 [Product](PRODUCT.md) owns behavior, scopes and lifetimes;
 [API contract](API_CONTRACT.md) owns protocol details;
 [Implementation](IMPLEMENTATION.md) owns milestones and completion evidence.
-Rules here are accepted security requirements unless explicitly marked proposed
-or unresolved. Standards requirements for the supported protocol are mandatory.
+**Accepted:** rules here are planned security requirements unless labeled
+**Proposed**, **Unresolved** or **Deferred** as defined in [AGENTS.md](../AGENTS.md). Standards requirements for the supported protocol are mandatory.
 
 Crow implements its own identity-provider engine. Use maintained protocol,
 password-hashing and cryptographic libraries; do not invent cryptographic
@@ -26,6 +26,10 @@ Pages, API, OAuth and discovery endpoints share one configured HTTPS origin.
 No separate Next.js server, refresh service or internal signing protocol is needed.
 PostgreSQL is private, authenticated and authoritative for durable state.
 Subscription billing is deferred.
+
+Opaque access tokens suit the initial deployment because Crow is their only
+resource server and every resource request already needs durable grant/app
+checks. ID tokens remain signed JWTs for OIDC interoperability.
 
 Application integrations and user-visible session boundaries follow
 [Product](PRODUCT.md). Enforce app ownership on every management operation;
@@ -108,7 +112,7 @@ constraints, expiry and cleanup. Database failures fail closed.
 
 Code exchange atomically consumes the code and creates its grant and optional
 refresh family. Constraints and locking prevent duplicate consumption/families.
-Prepare signed tokens and credentials before commit; return them only after
+Prepare signed ID tokens and opaque credentials before commit; return them only after
 confirmed commit. Signing failures roll back the transaction.
 
 A confirmed rollback leaves a code usable within its original lifetime.
@@ -116,17 +120,23 @@ Allow a bounded client retry only with an explicitly defined safe-retry signal.
 An uncertain exchange commit or lost success response requires fresh authorization;
 a generic error or timeout never proves rollback.
 
+Generate high-entropy opaque access tokens and store only their verifiers with
+the issuing client, user/sector subject mapping, scopes, Crow resource audience,
+issuance/expiry and grant relationship. Each resource request resolves the
+verifier and checks current app/grant state; missing, expired or revoked state
+grants no access. Raw tokens are returned only after confirmed commit.
+
 Retain consumed-code verifiers and issued-grant relationships until the grant can
 no longer be used. A replay passing original-client authentication, callback and
 PKCE bindings revokes its refresh family, if any, and marks its access-token grant
 revoked. Invalid bindings must not revoke another grant. Resource APIs check grant
 state until token expiry. App-local sessions cannot be remotely cleared this way.
-Before token implementation, define how token jti values map to stored grants.
+The access-token record links directly to its stored grant.
 
 ## Token signing and keys
 
-[API contract](API_CONTRACT.md#token-claims-and-validation) owns token claims and
-validation rules. Sign with a securely provisioned 3072-bit RSA private key.
+[API contract](API_CONTRACT.md#token-claims-and-validation) owns ID-token claims
+and protocol validation. Sign ID tokens with a securely provisioned 3072-bit RSA private key.
 Never commit private keys or bake them into images.
 
 Rotate keys every 90 days. Publish new public keys at least ten minutes before
@@ -140,17 +150,19 @@ rejection, and a compromised signer can forge trusted tokens.
 
 ## Refresh and revocation
 
+**Deferred:** refresh is outside the first complete OIDC integration.
+
 Use high-entropy opaque refresh credentials stored as verifiers with user,
 client, family, scopes, creation time, last successful use, absolute deadline and
 revocation state. Retain spent-token evidence until family expiry.
 Lock family/token state; rotate atomically and return credentials only after
 confirmed commit. Never extend the original absolute deadline.
 
-**Unresolved before refresh implementation:** duplicate handling, bounded retry
-semantics, any grace window, theft-triggered family revocation and recovery after
-an ambiguous commit or lost response. Strict revocation on every duplicate is
-removed. This does not authorize accepting spent tokens, creating independent
-successor branches or adding response replay without a reviewed design.
+**Unresolved:** duplicate/retry behavior, any grace window, theft response and
+recovery after an ambiguous commit or lost response. Do not implement refresh
+until the policy is accepted and its protocol outcomes are recorded in the API
+contract. The decision must prevent independent successor branches and define
+whether spent credentials can produce any response.
 If replay is selected, define protected response storage, retention and deletion;
 the existing verifier-only model cannot reconstruct a returned refresh token.
 Provide a reference backend covering concurrent requests and failures.

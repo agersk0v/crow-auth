@@ -8,27 +8,32 @@ Core are the chosen initial protocol. This is a planned contract, not implemente
 compatibility or certification. Use OAuth 2.0 security best practice (RFC 9700),
 PKCE (RFC 7636), discovery, Bearer token usage and RFC 7009 revocation.
 Internal browser/management endpoint shapes are proposals; standard wire formats
-follow the cited specifications. Protocol choices below are accepted except where
-explicitly marked unresolved. Changes must update their owning document and the
+follow the cited specifications. **Accepted:** protocol choices below apply to the planned initial integration
+unless labeled **Proposed**, **Unresolved** or **Deferred**. Decision labels are
+defined in [AGENTS.md](../AGENTS.md). Changes must update their owning document and the
 relevant milestone evidence.
 
 ## Discovery and public keys
 
 The issuer is one configured HTTPS URL, never inferred from Host headers.
 `GET /.well-known/openid-configuration` publishes that exact `issuer` plus
-`authorization_endpoint`, `token_endpoint`, `userinfo_endpoint`, `jwks_uri` and
-`revocation_endpoint` using absolute URLs. Publish truthful supported metadata:
+`authorization_endpoint`, `token_endpoint`, `userinfo_endpoint` and `jwks_uri`
+using absolute URLs. Publish only implemented, verified capabilities:
 
 - `response_types_supported`: `["code"]`
 - `response_modes_supported`: `["query"]`
 - `authorization_response_iss_parameter_supported`: `true` (RFC 9207)
-- `grant_types_supported`: `["authorization_code", "refresh_token"]`
+- `grant_types_supported`: `["authorization_code"]`; add `refresh_token` only
+  after the deferred refresh milestone is implemented and verified.
 - `subject_types_supported`: `["pairwise"]` (stable opaque subjects per sector)
 - `id_token_signing_alg_values_supported`: `["RS256"]`
 - `token_endpoint_auth_methods_supported`: `["client_secret_basic"]`
-- `revocation_endpoint_auth_methods_supported`: `["client_secret_basic"]`
+- **Deferred:** publish `revocation_endpoint` and
+  `revocation_endpoint_auth_methods_supported: ["client_secret_basic"]` only
+  when refresh-token revocation is supported.
 - `code_challenge_methods_supported`: `["S256"]`
-- `scopes_supported`: `["openid", "profile", "crow.subscription", "offline_access"]`
+- `scopes_supported`: `["openid", "profile"]` initially. Add `crow.subscription`
+  and `offline_access` only when their respective milestones are supported.
 - `claims_supported`: the ID-token/UserInfo claims actually implemented below.
 
 `GET /.well-known/jwks.json` exposes public RSA keys only: `kid`, `kty=RSA`,
@@ -49,7 +54,9 @@ explicit migration procedure exists.
 Required: `response_type=code`, `client_id`, exact registered `redirect_uri`,
 `scope` including `openid`, unpredictable browser-session-bound `state`, `nonce`,
 `code_challenge` and `code_challenge_method=S256`. Crow requires state and nonce
-as its security policy. Validate PKCE syntax and entropy per RFC 7636.
+as its security policy. Validate PKCE syntax, length, S256 and the verifier/challenge relationship per
+RFC 7636. Clients must generate verifiers with cryptographically secure randomness;
+Crow cannot measure their entropy from a submitted value.
 Only confidential web clients are supported; no implicit or password grants.
 
 Validate the complete request before creating a browser-bound 15-minute flow.
@@ -79,13 +86,10 @@ If both authentication and consent are missing, return login_required first.
 For prompt=none with max_age=0, return login_required without UI.
 Do not advertise request objects, dynamic client registration or other extensions.
 
-Scopes: `openid` releases `sub`; `profile` releases `preferred_username`;
-`crow.subscription` authorizes subscription reads. `offline_access` requests a
-refresh token and requires explicit consent for each new authorization grant.
-Without that grant, issue no refresh token. Other scopes are invalid_scope.
-Remember ordinary consent by user/client/permission version; expanding permissions
-requires consent again. Registration authenticates the pending flow without a
-second login; declining consent leaves the new account intact.
+Supported scope meanings and consent requirements are owned by
+[Product](PRODUCT.md#login-and-consent). Reject unknown or not-yet-supported scopes
+with invalid_scope. The first integration rejects offline_access and
+crow.subscription and never issues refresh tokens.
 
 Successful completion redirects using query response mode with `code` and original
 `state` (and issuer identification per RFC 9207). Codes last 60 seconds and bind
@@ -109,15 +113,15 @@ Code exchange fields: `grant_type=authorization_code`, `code`, `redirect_uri`,
 code/PKCE bindings. Follow [Architecture's transaction and replay rules](ARCHITECTURE.md#transactions-and-failures).
 Code replay returns invalid_grant; invalid bindings must not revoke legitimate grants.
 
-Example success with offline access:
+Initial code-exchange success:
 
 ```json
-{"access_token":"<access-JWT>","token_type":"Bearer","expires_in":600,"id_token":"<ID-JWT>","refresh_token":"<opaque-token>","scope":"openid profile crow.subscription offline_access"}
+{"access_token":"<opaque-access-token>","token_type":"Bearer","expires_in":600,"id_token":"<ID-JWT>","scope":"openid profile"}
 ```
 
 Token claims and validation are defined below.
 
-Refresh fields: `grant_type=refresh_token`, `refresh_token`, optional `scope`.
+**Deferred:** refresh fields: `grant_type=refresh_token`, `refresh_token`, optional `scope`.
 Omitting scope preserves the grant; supplied scopes must be a subset. Rotation
 cannot regain dropped scopes. Validate enabled client and family ownership.
 Refresh returns a new access and refresh token, expires_in, token_type and scope;
@@ -143,21 +147,21 @@ signal before allowing bounded retries after confirmed rollback.
 
 ## Token claims and validation
 
-Access JWT headers: `alg=RS256`, `kid`, `typ=at+jwt`. Follow RFC 9068:
-include `iss`, pairwise opaque `sub`, configured Crow resource `aud`,
-`client_id`, `scope`, `iat`, `exp` and unique `jti`.
+Access tokens are opaque Bearer credentials, not JWTs. Their storage and durable
+validation are owned by [Architecture](ARCHITECTURE.md#transactions-and-failures).
+Clients must not parse them. Crow resources require a live token, their resource
+audience, enabled issuing client, required scopes and a non-revoked grant, then
+resolve its subject in the issuing client's sector context.
+
 ID tokens use `typ=JWT`, RS256 and the single integrating client as `aud`;
 include `iss`, the same pairwise `sub`, `iat`, `exp`, original `auth_time`
 and request `nonce`. The profile scope permits preferred_username.
 Lifetimes are owned by [Product](PRODUCT.md#sessions-and-failure-behavior).
 Subscription status is never a token claim.
 
-Validate signature, explicit RS256 allowlist, known key, exact configured issuer,
+For ID tokens, validate signature, explicit RS256 allowlist, known key, exact configured issuer,
 claim types, expiry and issuance time with 30 seconds clock tolerance.
-Crow resources additionally require their resource audience, enabled issuing
-client, required scopes and a grant that has not been replay-revoked.
-Resolve the subject in that client's context to the internal user; never treat a
-pairwise subject as an internal UUID. ID tokens cannot authorize resource APIs.
+ID tokens cannot authorize resource APIs.
 Clients validate ID-token client audience and nonce against the initiating
 browser session, after validating state at the callback. Compare UserInfo sub to
 the ID-token sub. Key provisioning and rotation belong to
@@ -173,11 +177,15 @@ insufficient_scope where applicable.
 
 ## Subscription: GET /api/subscription
 
+**Deferred:** implement after the first complete OIDC integration.
+
 Require Bearer access token with the same validation and crow.subscription scope.
 Return `{"subscriber":false}` before Stripe. This is a custom protected resource,
 not an OIDC claim. No caller-supplied user ID or public subscription writes.
 
 ## Revocation: POST /oauth/revoke
+
+**Deferred:** publish with refresh support after its decision gate is resolved.
 
 Follow RFC 7009: form fields `token` and optional `token_type_hint=refresh_token`,
 with client_secret_basic authentication. Revoke only the authenticated client's
@@ -189,7 +197,7 @@ The hint is advisory: ignore unrecognized hints and search supported token store
 when the hinted lookup misses. An unsupported hint alone is not an error. A known
 access token may return unsupported_token_type; unknown tokens still receive 200.
 Dependency failure is 503, not a successful revocation. The app clears local state
-even on failure; existing access JWTs expire naturally. This is app logout, not
+even on failure; existing access tokens expire naturally. This is app logout, not
 OIDC RP-initiated logout; discovery must not advertise end_session_endpoint.
 
 ## Crow browser and portal endpoints
@@ -207,7 +215,7 @@ GET /login without a bound app flow is portal login; /oauth/authorize starts app
 flows and routes to hosted UI. GET /register preserves a validated flow.
 Expired/invalid app flows require restart, never a fallback to portal login.
 
-Proposed handlers:
+**Proposed:** internal browser handlers:
 
 - POST /api/hosted/login and /api/hosted/register: username/password plus CSRF
   and an optional bound flow; enforce [Product account rules](PRODUCT.md#accounts).
@@ -221,6 +229,8 @@ Never return app tokens to browser handlers. Flow state and identity binding
 follow [Architecture](ARCHITECTURE.md#authorization-state-machine).
 
 ## Developer management proposals
+
+**Proposed:** handler shapes below; Product owns management behavior.
 
 All routes require portal session; mutations additionally require CSRF and Origin.
 Ownership comes from stored owner UUID, never supplied request owner IDs.
@@ -249,7 +259,8 @@ Rust owns signing and session operations; PostgreSQL is authoritative. Finalize
 transaction isolation, lock order, uniqueness constraints and restore invalidation.
 Keep portal errors separate from OAuth token/authorization and Bearer resource
 errors. Publish a standard OIDC client walkthrough covering discovery, state,
-nonce, PKCE, ID-token verification, UserInfo and the selected refresh coordination policy. Run applicable
+nonce, PKCE, ID-token verification and UserInfo. Extend the walkthrough with the
+selected refresh coordination policy when that milestone is implemented. Run applicable
 protocol/conformance tests and cross-client/token-substitution tests before claiming
 compatibility. Completion evidence belongs in [Implementation](IMPLEMENTATION.md). Dynamic registration, upstream Google/Discord login, public
 browser clients and OIDC logout are deferred; do not advertise them in discovery.

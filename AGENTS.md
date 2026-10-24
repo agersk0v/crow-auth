@@ -4,6 +4,10 @@ Read README.md for implemented status and commands, docs/PRODUCT.md for behavior
 docs/ARCHITECTURE.md for security enforcement and docs/API_CONTRACT.md for protocol
 details. docs/IMPLEMENTATION.md tracks bounded milestones. Planned is not implemented.
 
+Decision labels used throughout: **Accepted** is chosen planned behavior;
+**Proposed** is a candidate shape; **Unresolved** needs a decision before its
+stated deadline; **Deferred** is outside the current release. None proves implementation.
+
 - Standards requirements are mandatory. Each document owns the subject above.
   Flag conflicting requirements with both sources and a recommended resolution;
   continue independent work. Do not silently choose or invent behavior.
