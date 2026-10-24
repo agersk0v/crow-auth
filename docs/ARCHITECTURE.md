@@ -2,192 +2,177 @@
 
 ## Status and authority
 
-This is a pre-implementation draft. PRODUCT.md owns product behavior; README.md
-describes runnable code. Only the Rust/Axum HTTP service, PostgreSQL pool,
-startup connectivity check, and health endpoint currently exist.
+Pre-implementation design. [PRODUCT.md](PRODUCT.md) owns product behavior;
+[API_CONTRACT.md](API_CONTRACT.md) proposes endpoint shapes; [README](../README.md)
+describes runnable code. Only the Rust/Axum service, PostgreSQL pool, startup
+connectivity check and health endpoint exist. The decisions below are agreed,
+not implemented. Wire-level proposals remain subject to implementation review.
 
-Service responsibilities and session durations below reflect confirmed product
-behavior. Sections labelled proposed defaults are recommendations, not previously
-agreed requirements. Resolve the remaining decisions before implementing the
-affected flow; do not silently choose a security contract in code.
+## Services and trust boundaries
 
-## Service responsibilities
+- Rust/Axum owns accounts, password verification, app ownership/configuration,
+  authorization flows, codes, portal sessions and the public API.
+- PostgreSQL stores durable accounts, application configuration, consent,
+  subscription state, portal sessions and pending authorization flows.
+- Private Go owns refresh-session creation, rotation and revocation in Redis.
+- Rust signs initial access JWTs; Go signs refreshed JWTs. Both use the same
+  securely provisioned 3072-bit RSA private key and RS256 token specification.
+- Next.js serves hosted login/registration, account and developer pages.
+- Stripe is deferred; billing does not block the authentication milestone.
 
-- Rust/Axum: accounts, password verification, app ownership and configuration,
-  authorization codes, initial authentication, and subscription-status API.
-- PostgreSQL: durable accounts, application configuration and subscription state.
-- Go: refresh-session creation, rotation, revocation, and issuing refreshed JWT
-  access tokens, backed by Redis.
-- Redis: refresh-session records and replay detection. It does not replace
-  PostgreSQL as the account store or make JWTs require database lookups.
-- Next.js: required Crow-hosted login and registration, plus account and developer
-  pages. Application backends integrate through the supported APIs.
-- Stripe: planned billing integration; its detailed lifecycle contract is deferred.
+Pages and `/api` share one public HTTPS origin, routed internally to Next.js and
+Rust. The domain remains undecided. Go and Redis are private. Rust calls Go over
+TLS using a dedicated service secret, separate from JWT keys and client secrets.
+Go permits only explicit internal operations and validates user/client/session
+bindings. Network location alone does not authenticate a caller.
 
-Initial token issuance and refresh-session creation must form a defined Rust/Go
-contract. Decide which service signs initial access tokens and how partial
-failures are handled before implementation.
+Applications call Rust for exchange, refresh, logout, identity and subscription.
+Refresh/logout require client credentials and a refresh token; Go verifies the
+session belongs to the authenticated client. Browser-only integrations and app
+password collection are excluded. Hosted credential endpoints require CSRF and
+origin checks and framing protection. CORS is not authentication.
 
-## Confirmed authentication behavior
+## Accounts and secrets
 
-Every integrating application must have a backend that authenticates with a
-client secret. Browser-only integrations are outside the initial scope. Browser
-code must never receive a client secret. Hosted login and registration are the
-only supported application authentication path, including for first-party apps.
-Applications must not collect or forward Crow passwords. The application backend
-exchanges its authorization code using PKCE and client authentication. No
-application-facing password login or registration API is exposed; Crow-hosted
-pages submit credentials to Crow's own authentication backend.
+Username/password rules are authoritative in PRODUCT.md. Enforce normalized
+username uniqueness in PostgreSQL. Hash passwords with Argon2id, unique random
+salts and stored cost parameters; benchmark costs before public deployment.
+Count password length consistently as Unicode code points, without normalization.
+Apply a bounded request size that permits the full supported UTF-8 password.
+Select the common/compromised-password dataset and update process before release;
+never send plaintext passwords to a third party.
 
-Hosted login requires a registered client, exact registered callback, request
-state, and PKCE. Successful authentication or registration returns a short-lived,
-single-use authorization code and state, never tokens in a redirect.
-Invalid application parameters produce an error. Each new application
-authorization requires credentials; an existing portal session does not provide
-SSO. Registration satisfies authentication for its pending flow.
+Client secrets are high-entropy random values, shown once and stored as verifiers.
+Allow two active secrets per app, with identifiers and creation dates. Owners can
+revoke either immediately; ordinary rotation overlaps until explicit revocation.
+No secret revocation automatically revokes user sessions. Enforce ownership on
+every management operation. Never log passwords, tokens, authorization headers,
+client/service secrets, signing keys or database credentials.
 
-An app's access token may retrieve only its authenticated user's subscription
-status. Derive that user from the verified token. Subscription status is not
-embedded in JWT claims. App business data remains owned by each app.
+## Browser and portal sessions
 
-## Authorization enforcement
+Application backends retain both access and refresh tokens in protected server
+storage. Their browser uses a Secure, HttpOnly random session-handle cookie.
+Backends serialize refreshes across instances, not just within one process.
+Each application is responsible for its own cookie/CSRF and session protection.
 
-The permissions table in PRODUCT.md owns caller permissions. Every protected
-endpoint must declare its accepted credential type and enforce the corresponding
-user, client, audience, and ownership checks server-side. A client secret does
-not establish user identity; an application access token does not authorize
-portal account or developer operations. Derive resource ownership from verified
-identity and stored ownership, never solely from caller-supplied IDs.
+Crow portal sessions live in PostgreSQL with verifiers of high-entropy random
+session tokens. Cookies are host-only, Secure, HttpOnly and SameSite=Lax. Expiry
+is absolute at eight hours; logout invalidates the server record and clears the
+cookie. Cookie-authenticated mutations require CSRF protection and origin checks.
+Application login/registration does not create a portal session. Portal sessions
+cannot silently authorize an application. Global logout is outside initial scope.
 
-Reject missing credentials and unauthorized operations without exposing private
-resource details. Subscription status has no public user/app write operation.
-Internal subscription updates require their separately defined service contract.
+## Authorization flow and consent
 
-## Confirmed session behavior
+Store validated pending requests in PostgreSQL for 15 minutes, bound to the
+initiating browser with a random flow cookie. Retain client ID, exact callback,
+state and PKCE S256 challenge, never passwords. A flow cookie grants no portal
+permissions. Consume completion once, after credentials and first-use consent.
+Registration authenticates the pending flow without a second login.
 
-Access JWTs expire after 10 minutes and are bound to the application's audience.
-Refresh sessions expire after 7 days idle or 30 days total, whichever occurs
-first. Refresh tokens rotate on use. Reuse revokes the session family.
-Loss of Redis session data requires affected users to log in again.
+Consent discloses UUID, username and subscription access, app name and destination
+domain. Remember consent by user/client and permission version. Do not infer app
+trustworthiness from registration. Decline consumes the flow and returns
+`error=access_denied` plus state only to an already validated callback.
 
-Normal app logout revokes the current refresh-session family and clears local
-session state. Already issued JWTs expire naturally. Other apps and devices
-remain signed in. Portal sessions last at most 8 hours; portal logout clears
-the current portal session. Global logout is outside initial scope.
+Codes expire 60 seconds after issuance and bind user, client, exact callback and
+PKCE challenge. Require client authentication and consume codes atomically.
+Never redirect tokens. Reject unvalidated callbacks, incomplete parameters,
+expired/reused codes or incorrect PKCE. HTTPS callbacks are required except HTTP
+on exact localhost/127.0.0.1 development hosts; no fragments or wildcards.
 
-## Proposed defaults: passwords and abuse prevention
+## Initial exchange and partial failures
 
-- Hash passwords with Argon2id, unique random salts, and stored algorithm/cost
-  parameters. Benchmark costs on production hardware before choosing values.
-- Never store plaintext passwords or log credentials, authorization headers,
-  tokens, client secrets, or database connection strings.
-- Define username normalization, casing, allowed characters, length limits,
-  password limits, and uniqueness constraints before account migrations.
-- Rate-limit registration, login, code exchange, and refresh using appropriate
-  account, client, and network signals. Define numeric limits before release.
-- Use generic login failures to avoid revealing whether a username exists.
-- Use HTTPS for external traffic. Protect hosted credential-submission endpoints
-  against CSRF and origin abuse; do not enable cross-origin credential submission
-  by integrating apps. Prevent framing of hosted login and registration pages.
-- No recovery is initially provided: document that forgotten passwords cannot
-  currently be recovered. Do not add an undocumented recovery bypass.
+Rust verifies the code and client and orchestrates session creation in Go.
+Exchange succeeds only once the refresh session exists. Failures issue no tokens.
+Use a stable internal operation ID bound to the code, user and client so retrying
+session creation cannot create duplicate families. A successful code cannot be
+exchanged again. Temporary retries must finish within the original code lifetime.
 
-## Proposed defaults: authorization codes and client secrets
+Before implementing this boundary, specify a durable exchange state machine for
+pending, in-progress and completed exchanges, including races, lost internal
+responses, cleanup and orphan sessions. Go must resolve a repeated operation to
+one outcome without logging credentials. A lost public success response requires
+fresh authorization; idempotency of internal creation does not make codes reusable.
+The response-recovery mechanism and secret retention for internal retries remain
+implementation details requiring review, not an assumed distributed transaction.
 
-- Require PKCE S256. Bind codes to client ID, exact redirect URI, PKCE challenge,
-  and authenticated user; set an explicit short expiry and consume atomically.
-- Confidential clients authenticate during code exchange as well as using PKCE.
-- Never redirect to an unvalidated callback, including on an error.
-- Generate high-entropy client secrets, show them only on creation/rotation,
-  and store verifiers rather than retrievable plaintext.
-- Check application ownership on every management operation.
-- Define secret rotation/revocation, app disablement, and permitted production
-  versus local-development callback schemes before those features are built.
+## JWT contract and key rotation
 
-## Proposed defaults: refresh storage and concurrency
+Access JWTs last ten minutes. Header: `alg=RS256`, `kid`, and `typ=JWT`.
+Claims: `iss` (configured Crow issuer), `sub` (immutable user UUID), `aud` (one
+client ID), `iat`, `exp`, and unique `jti`. Username and subscription are fetched
+from APIs, not embedded. Tokens are signed, not encrypted.
 
-Use high-entropy opaque refresh tokens, not reusable access JWTs as refresh
-credentials. Store a cryptographic verifier, user/client IDs, family ID,
-creation time, last successful use, absolute expiry, and revocation state.
-Retain enough spent-token information to detect reuse until family expiry.
+Validate signature, an explicit RS256 allowlist, known key, exact issuer, expected
+audience, UUID subject, claim types and time bounds. Allow 30 seconds of clock
+tolerance; reject unreasonable future issuance. Applications receive public keys
+only. Crow identity/subscription endpoints independently authenticate client
+credentials and require JWT audience equal to that client, deriving user from sub.
+They also reject disabled apps. App JWTs never authorize portal management.
 
-Go performs refresh validation, old-token consumption, successor creation, and
-idle-expiry updates atomically in Redis. Rotation must preserve the original
-30-day deadline. A revoked family cannot refresh. Fail closed if Redis is
-unavailable; never reconstruct a session from an unverified token.
+Publish public keys through JWKS. Rotate every 90 days, publishing new public keys
+at least ten minutes before coordinated Rust/Go activation. Retain old public
+keys at least fifteen minutes after both stop signing with them. Both services
+must acknowledge rollout; a lagging signer extends retention. Verifiers refresh
+JWKS on unknown kid with rate limiting and bounded caching. A compromised key
+requires emergency replacement and rejection policy; cached external verification
+keys can delay rejection. Shared keys mean either compromised signer can forge
+trusted tokens. Never commit private keys or bake them into images.
 
-Define client retry and concurrent-refresh behavior explicitly. Under strict
-reuse detection, presenting a spent token revokes its family even when the
-cause is an accidental duplicate request; clients must serialize refreshes.
-Do not introduce an undocumented grace window.
+## Refresh, logout and Redis
 
-## Proposed defaults: JWTs and service trust
+Refresh tokens are high-entropy opaque credentials. Store verifiers and user,
+client, family ID, creation time, last successful use, original absolute deadline
+and revocation state. Retain spent-token evidence until family expiry. Atomically
+consume old tokens, create successors and update idle expiry. Sessions expire
+seven days idle or thirty days total, whichever comes first. Rotation never
+extends the original thirty-day deadline.
 
-Use asymmetric signing and publish public verification keys through a JWKS
-endpoint. Require an allowlisted algorithm and validate signature, issuer,
-audience, subject, expiry, and applicable time claims. Include a key identifier.
-Define issuer, claims, clock tolerance, rotation cadence, and key-retention
-period before issuing tokens.
+Strict reuse detection revokes the family, including accidental duplicates. No
+grace window. Application backends must serialize refreshes across instances;
+a lost refresh response requires login rather than a blind retry. App logout
+revokes its current family and clears local app state; existing JWTs expire
+naturally. Other applications/devices remain signed in.
 
-Prefer one signing authority for initial and refreshed tokens. If both Rust and
-Go sign, define distinct private-key ownership and a consistent verification
-contract. Applications receive public keys, never signing keys.
+Redis uses AOF with one-second flushing and noeviction. Fail closed on unavailable
+Redis or failed writes; missing records require login. Crashes may lose recent
+rotation or revocation writes. A known restore/rollback invalidates all refresh
+sessions before serving requests; define an operational generation/invalidation
+procedure before deployment, including disabling persistence recovery until done.
+Never reconstruct sessions from unverified tokens. PostgreSQL portal sessions
+are unaffected. Go must enforce app disablement even if Redis revocation fails;
+define durable app-state propagation/checks before implementing disablement.
 
-Keep Go and Redis off the public network. Authenticate Rust-to-Go calls over
-an encrypted channel; network location alone is insufficient. Specify service
-credentials, allowed operations, timeouts, and failure behavior. Bind every
-session operation to its user and application; never trust caller-supplied
-identity without authentication and authorization.
+## Operations and remaining work
 
-## Proposed defaults: browser and portal sessions
+Use temporary throttling by normalized account and source IP, generic login
+failures and separate registration/exchange/refresh limits. Choose numeric limits,
+trusted proxy rules and limiter-outage behavior before public exposure. Keep
+security logs free of credentials and define retention/access policies.
 
-Use backend-mediated browser integrations. Prefer Secure, HttpOnly cookies
-for refresh or server-side session handles. Avoid persistent browser storage
-of refresh credentials. Define deployment origins and cross-site behavior
-before choosing SameSite policy.
+Remaining implementation details: account/session migrations and indexes; exact
+Argon2 costs; password blocklist source; endpoint proposal review; exchange failure
+state machine; internal operation schemas/timeouts; service-secret rotation;
+Redis restore procedure; disablement propagation; JWKS cache bounds; consent
+versioning; trusted proxy configuration; numeric limits and deployment secrets.
+Billing still needs customer ownership, eligible states, plans/trials, lifecycle
+precedence, webhook idempotency and reconciliation. No billing writes are exposed.
 
-Protect cookie-authenticated mutations with CSRF controls and origin checking.
-Use explicit CORS allowlists where needed; CORS is not client authentication.
-Keep portal sessions distinct from application refresh sessions. Hosted pages
-use Crow account/application APIs with the permissions required for each
-operation; credential submission is reserved for Crow-hosted flows.
+## First milestone acceptance checks
 
-## Decisions required before implementation
-
-1. Username/password policies and account schema.
-2. Endpoint schemas, error codes, hosted registration behavior, and code lifetime.
-3. Initial signer, Rust/Go service contract, service authentication, signing-key
-   storage, JWKS publication, and rotation.
-4. Portal session storage, browser token handling, cookie/CSRF/CORS rules.
-5. Refresh concurrency semantics, Redis durability/expiry configuration, and
-   behavior when account or application state changes.
-6. Secret provisioning and revocation; application disablement/deletion.
-7. Consent and user-facing disclosure for third-party identity access.
-8. Numeric rate limits and operational handling of suspicious login attempts.
-
-Billing implementation additionally requires the product's outstanding Stripe
-ownership, eligible states, plans, grace-period precedence, and reconciliation
-decisions. Billing does not block the first authentication milestone.
-
-## Acceptance checks for the first authentication milestone
-
-- A registered user can authenticate through hosted login, with code exchange
-  by a confidential application backend; registration completes the pending
-  hosted authorization.
-- Integrating applications cannot exchange a username/password for tokens or
-  register accounts directly; credential submission is limited to Crow-hosted
-  flows, with CSRF/origin and framing protections.
-- Invalid callbacks, mismatched PKCE, expired/reused codes, wrong audiences,
-  and invalid signatures fail.
-- Another user cannot manage an application they do not own.
-- A client secret alone cannot read user data or manage accounts/applications;
-  an application access token cannot authorize portal management operations.
-- An app token queries only its current user's subscription status. Before Stripe
-  integration, this endpoint returns non-subscriber for every user.
-- Refresh rotates atomically; reuse revokes the family; idle and total expiry
-  work independently; Redis failure does not grant access.
-- Logout prevents further refresh for that session while other sessions remain.
-- Portal sessions cannot silently authorize a new application.
-- Authentication failures and logs expose no credentials or tokens.
-
-
+- Hosted registration and login complete a consented code flow without creating
+  a portal session; direct portal registration/login does create one.
+- Apps cannot collect Crow passwords or use direct password grants.
+- Callback/PKCE/state validation, single-use codes and expiry work under races.
+- Failed internal creation produces no successful exchange or duplicate families.
+- Client credentials alone reveal no user; JWTs cannot authorize portal management.
+- Cross-client audiences, other-user access and non-owner management fail.
+- First-use consent, cancellation and flow expiry have the documented results.
+- Both signers produce the same token contract; key overlap and unknown kid work.
+- Refresh atomicity, strict reuse, idle/absolute expiry and lost responses behave
+  as specified; Redis failures never grant sessions.
+- Disable/re-enable and secret rotation preserve the documented boundaries.
+- Portal expiry/logout and cookie/CSRF/origin controls work.
+- Subscription is non-subscriber before Stripe; logs contain no credentials.

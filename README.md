@@ -2,9 +2,20 @@
 
 Rust HTTP service using Axum and Tokio. Authentication is not implemented yet.
 
+## Design documents
+
+Crow Auth is a planned shared identity and subscription service with hosted login,
+backend-only app integrations and a separate account/developer portal.
+
+- [Product behavior](docs/PRODUCT.md)
+- [Architecture and security](docs/ARCHITECTURE.md)
+- [Draft API contract](docs/API_CONTRACT.md)
+
+These describe planned behavior; the runnable implementation remains the skeleton below.
+
 ## Development
 
-Install a stable Rust toolchain and PostgreSQL (or Docker). To start a local database:
+Install a stable Rust toolchain and PostgreSQL (or Docker). To start a local database (Bash):
 
 ```sh
 read -rsp 'Local PostgreSQL password: ' POSTGRES_PASSWORD; echo
@@ -38,6 +49,7 @@ liveness endpoint; it does not check ongoing database health.
 
 ```sh
 cargo check --locked
+cargo test --locked
 curl --fail http://127.0.0.1:3000/health
 ```
 
