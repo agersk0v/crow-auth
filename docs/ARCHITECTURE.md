@@ -21,9 +21,9 @@ No separate Next.js server, refresh service or internal signing protocol is need
 PostgreSQL is private, authenticated and authoritative for durable state.
 Subscription billing is deferred.
 
-Opaque access tokens suit the initial deployment because Crow is their only
-resource server and every resource request already needs durable grant/app
-checks. ID tokens remain signed JWTs for OIDC interoperability.
+The [token formats](API_CONTRACT.md#token-claims-and-validation) suit the initial
+deployment: Crow is the only access-token resource server and every resource
+request already needs durable grant/app checks.
 
 Application integrations and user-visible session boundaries follow
 [Product](PRODUCT.md). Enforce app ownership on every management operation;
@@ -71,14 +71,13 @@ authentication time, creation time, absolute expiry and revocation state.
 Cookies are host-only, Secure, HttpOnly and SameSite=Lax. Rotate the handle on
 credential authentication, revoke the prior handle and establish a new session.
 SSO reuse preserves the original authentication time and deadline.
-Product owns lifetimes and the effects of portal versus app logout.
+[Product](PRODUCT.md#sessions-and-failure-behavior) owns lifetimes and logout effects.
 
 Cookie-authenticated mutations, including login/registration, require CSRF tokens
 and validated Origin checks. Protect pages against framing, escape untrusted
 template content, bound request sizes and prevent sensitive-response caching.
-SameSite and CORS are not substitutes for CSRF or authorization. HTMX requests
-receive the same checks as ordinary forms. Define CSRF issuance before browser
-endpoint implementation.
+SameSite and CORS are not substitutes for CSRF or authorization. Define CSRF
+issuance before browser endpoint implementation.
 
 Top-level redirects are the supported SSO path. Hidden iframes and third-party
 cookies are not a reliability requirement.
@@ -125,21 +124,18 @@ a generic error or timeout never proves rollback.
 Generate high-entropy opaque access tokens and store only their verifiers with
 the issuing client, user/sector subject mapping, scopes, Crow resource audience,
 issuance/expiry and grant relationship. Each resource request resolves the
-verifier and checks current app/grant state; missing, expired or revoked state
-grants no access. Raw tokens are returned only after confirmed commit.
+verifier and applies the [resource validation rules](API_CONTRACT.md#token-claims-and-validation).
 
 Retain consumed-code verifiers and issued-grant relationships until the grant can
 no longer be used. A replay passing original-client authentication, callback and
 PKCE bindings revokes its refresh family, if any, and marks its access-token grant
 revoked. Invalid bindings must not revoke another grant. Resource APIs check grant
 state until token expiry. App-local sessions cannot be remotely cleared this way.
-The access-token record links directly to its stored grant.
 
-App disablement atomically marks the app disabled and permanently revokes its
-existing grants and refresh families. Serialize it with authorization completion,
-exchange and refresh through durable app state and consistent transaction locking.
-Re-enabling permits new authorizations but never clears those revocations; old
-access tokens remain rejected. Cleanup is not the enforcement mechanism.
+Enforce [Product app disablement and re-enablement](PRODUCT.md#portal-and-developer-apps)
+by atomically marking the app disabled and revoking its grants and refresh families.
+Serialize this with authorization completion, exchange and refresh through durable
+app state and consistent transaction locking. Cleanup is not the enforcement mechanism.
 
 ## Token signing and keys
 
@@ -158,7 +154,7 @@ rejection, and a compromised signer can forge trusted tokens.
 
 ## Refresh and revocation
 
-**Deferred:** refresh is outside the first complete OIDC integration.
+**Deferred:** see [integration scope](PRODUCT.md#login-and-consent).
 
 Use high-entropy opaque refresh credentials stored as verifiers with user,
 client, family, scopes, creation time, last successful use, absolute deadline and
@@ -175,8 +171,7 @@ If replay is selected, define protected response storage, retention and deletion
 the existing verifier-only model cannot reconstruct a returned refresh token.
 Provide a reference backend covering concurrent requests and failures.
 
-Coordinate refresh and disablement through durable app state and transaction
-locking. Follow the permanent grant/family revocation rules in
+Follow the disablement coordination rules in
 [Transactions and failures](#transactions-and-failures).
 Missing, expired or revoked state grants no tokens. Product owns logout effects.
 

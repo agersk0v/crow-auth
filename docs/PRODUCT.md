@@ -26,8 +26,7 @@ be disclosed during registration.
 
 Email-based password recovery is planned for a later milestone. It may be delayed
 during the prototype, but must be designed and implemented before public production
-use. Initially no email is collected and recovery remains unavailable. Before recovery
-launch, define verified email enrollment for existing and new accounts, secure
+use. Before recovery launch, define verified email enrollment for existing and new accounts, secure
 address changes, single-use expiring reset links, abuse protection, generic reset
 responses and the password-replacement invalidation rules below. Never trust an unverified address
 or silently attach one during a forgotten-password request.
@@ -48,16 +47,14 @@ owns subject mapping and storage.
 
 ## Login and consent
 
-1. The app backend starts authorization at `/oauth/authorize`, binding state,
-   nonce and PKCE to its initiating browser session.
+1. The app backend starts the [authorization flow](API_CONTRACT.md#authorization-get-oauthauthorize).
 2. Crow validates the request and shows hosted login or registration.
 3. A valid Crow browser session, fresh credentials or registration authenticates
    the flow. Crow obtains required
    consent and returns a single-use code and original state to the exact callback.
-4. The backend checks state, exchanges the code at `/oauth/token`, validates the
-   ID token and uses its `sub` as the app-specific identity for its local account/session.
-5. Access tokens authorize Crow APIs. ID tokens never authorize API requests.
-   **Deferred:** refresh tokens extend access when offline access is introduced.
+4. The backend completes [code exchange and token validation](API_CONTRACT.md#token-post-oauthtoken)
+   and uses `sub` as the app-specific identity for its local account/session.
+5. Access tokens authorize Crow APIs; see the [permissions](#permissions) below.
 
 The first complete integration includes hosted login, consent, discovery, code
 exchange, ID tokens and UserInfo. It issues no refresh tokens and does not support
@@ -74,15 +71,12 @@ and refresh families remain separate. Consent is still required as documented be
 Remembered consent alone never authenticates a user. Invalid or expired app flows
 never silently become portal login.
 
-SSO reuse preserves the original authentication time and browser-session deadline.
-Apps can request fresh authentication, forced consent or a silent result using
-[API prompt and freshness rules](API_CONTRACT.md#authorization-get-oauthauthorize).
-
 Consent shows requested permissions, app name and destination domain without
 implying endorsement. Remember ordinary consent by user, app and permission
 version; ask again when permissions expand. **Deferred:** offline access requires explicit
-consent for each new grant once supported. Decline consumes the flow and returns access_denied
-and state only to a validated callback. A newly registered account remains created.
+consent for each new grant once supported. Decline consumes the flow and returns
+the [authorization denial response](API_CONTRACT.md#authorization-get-oauthauthorize).
+A newly registered account remains created.
 
 | Scope | Permission |
 | --- | --- |
@@ -91,8 +85,8 @@ and state only to a validated callback. A newly registered account remains creat
 | `crow.subscription` (**Deferred**) | Read the current user's subscription status |
 | `offline_access` (**Deferred**) | Receive rotating refresh tokens after explicit consent |
 
-The [API contract](API_CONTRACT.md) defines prompt behavior and supported features.
-Google/Discord login options are separate future integrations.
+The [API contract](API_CONTRACT.md#authorization-get-oauthauthorize) defines prompt
+and freshness behavior.
 
 ## Permissions
 
@@ -104,16 +98,14 @@ Google/Discord login options are separate future integrations.
 | Backend with client credentials and refresh token | Refresh or revoke its family | Bound to that user, client and family |
 | User with portal session | View account, register and manage owned apps | Check ownership on every management operation |
 
-App access and ID tokens cannot manage the portal. UserInfo and subscription
-accept access tokens, never ID tokens, and reject disabled issuing apps.
-Subscription status is read-only to users/apps; no public API grants it.
+ID tokens never authorize API requests. See [token validation](API_CONTRACT.md#token-claims-and-validation)
+for resource checks. Subscription status is read-only to users/apps; no public API grants it.
 
 ## Portal and developer apps
 
-Direct login/registration creates the shared Crow browser session and goes to
-/account. Hosted app login creates that session but continues to the app callback.
-Protected pages require login. Axum renders templates with HTMX enhancements
-for these pages:
+After direct login/registration, continue to `/account`; hosted flows continue
+to consent or the app callback. Protected pages require login. The portal has
+these pages:
 
 | Page | Purpose |
 | --- | --- |
@@ -153,10 +145,9 @@ Crow resource-token contract. Existing app-local sessions are not remotely clear
 | Pending hosted flow | 15 minutes |
 | Authorization code | 60 seconds after issuance |
 
-Backends retain tokens in protected server storage; browsers receive a random
-app-session cookie handle. **Deferred:** refresh tokens rotate;
-[Architecture](ARCHITECTURE.md#refresh-and-revocation) owns enforcement and the
-unresolved retry policy.
+[Architecture](ARCHITECTURE.md#browser-security-and-sessions) owns browser-session
+and backend token storage. Its [refresh policy](ARCHITECTURE.md#refresh-and-revocation)
+covers deferred rotation and unresolved retries.
 
 App logout clears local state and, once refresh is supported, revokes its current
 refresh family. Other apps
@@ -185,8 +176,7 @@ precedence, webhook idempotency and reconciliation. Billing does not block auth.
 **Deferred:** external/social/passwordless login, MFA, profile changes,
 account deletion, organizations/teams, app business roles, paid feature gating,
 embedded components and a broad admin dashboard are deferred. Define their
-contracts before exposure. Password recovery and password changes are required
-before public production as specified above. Clerk/Google feature parity is not a requirement.
+contracts before exposure. Clerk/Google feature parity is not a requirement.
 
 ## Implementation
 

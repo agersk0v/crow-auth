@@ -33,7 +33,7 @@ using absolute URLs. Publish only implemented, verified capabilities:
 - `claims_supported`: the ID-token/UserInfo claims actually implemented below.
 
 `GET /.well-known/jwks.json` exposes public RSA keys only: `kid`, `kty=RSA`,
-`use=sig`, `alg=RS256`, `n`, `e`. Follow Architecture key rotation/cache rules.
+`use=sig`, `alg=RS256`, `n`, `e`. Follow [key rotation/cache rules](ARCHITECTURE.md#token-signing-and-keys).
 These two endpoints are public and do not need client authentication.
 
 ## Pairwise subject sectors
@@ -55,19 +55,15 @@ RFC 7636. Clients must generate verifiers with cryptographically secure randomne
 Crow cannot measure their entropy from a submitted value.
 Only confidential web clients are supported; no implicit or password grants.
 
-Validate the complete request before creating a browser-bound 15-minute flow.
-Store nonce, scopes, client, callback, state and challenge server-side. Show
-Crow-hosted login/registration when no usable Crow browser session exists, then
-obtain required consent. A valid session enables SSO with its original auth_time.
-`prompt=login` forces fresh authentication; `prompt=consent` forces consent.
-`prompt=none` must be used alone: return a code without UI only when session,
-freshness and consent requirements are satisfied; otherwise return login_required
-or consent_required to the validated callback. Offline-access grants requiring
-explicit consent cannot complete silently.
+Validate the complete request before creating the
+[browser-bound flow](ARCHITECTURE.md#authorization-state-machine), using
+[Product lifetimes](PRODUCT.md#sessions-and-failure-behavior). Apply the prompt
+behavior below and [Product consent requirements](PRODUCT.md#login-and-consent).
+Offline-access grants requiring explicit consent cannot complete silently.
 Support nonnegative integer `max_age` in seconds: reauthenticate when the original
 authentication is older; zero always requires fresh authentication. Include the
 actual credential authentication time as `auth_time` in ID tokens. Reject unsupported
-prompt values, combinations and request features with appropriate standard errors.
+request features with appropriate standard errors.
 
 | prompt | Behavior |
 | --- | --- |
@@ -80,15 +76,16 @@ prompt values, combinations and request features with appropriate standard error
 
 If both authentication and consent are missing, return login_required first.
 For prompt=none with max_age=0, return login_required without UI.
-Do not advertise request objects, dynamic client registration or other extensions.
+Discovery must not advertise request objects, dynamic client registration, upstream
+login providers, public browser clients, OIDC logout (`end_session_endpoint`) or
+other unsupported extensions.
 
 Supported scope meanings and consent requirements are owned by
 [Product](PRODUCT.md#login-and-consent). Reject unknown or not-yet-supported scopes
-with invalid_scope. The first integration rejects offline_access and
-crow.subscription and never issues refresh tokens.
+with invalid_scope; [discovery](#discovery-and-public-keys) lists the initial scopes.
 
 Successful completion redirects using query response mode with `code` and original
-`state` (and issuer identification per RFC 9207). Codes last 60 seconds and bind
+`state`. Codes use the [Product lifetime](PRODUCT.md#sessions-and-failure-behavior) and bind
 user, client, callback, nonce, scopes, authentication time and PKCE challenge.
 Denial returns `error=access_denied` and original state to a validated callback.
 Include `iss` on success and applicable error redirects as required by RFC 9207.
@@ -102,12 +99,12 @@ Use `application/x-www-form-urlencoded` and HTTP Basic client authentication
 (`client_secret_basic`, with OAuth credential encoding). Never accept client secrets
 in URLs or require custom Crow authentication headers. Reject duplicate parameters
 and multiple authentication mechanisms. Responses use `Cache-Control: no-store`
-and `Pragma: no-cache`. Redact credentials, tokens and callback queries in logs.
+and `Pragma: no-cache`. Apply [secret-handling rules](ARCHITECTURE.md#accounts-identifiers-and-secrets).
 
 Code exchange fields: `grant_type=authorization_code`, `code`, `redirect_uri`,
 `code_verifier`. Validate client, enabled state, exact callback, expiry and all
 code/PKCE bindings. Follow [Architecture's transaction and replay rules](ARCHITECTURE.md#transactions-and-failures).
-Code replay returns invalid_grant; invalid bindings must not revoke legitimate grants.
+Code replay returns invalid_grant.
 
 Initial code-exchange success:
 
@@ -115,16 +112,13 @@ Initial code-exchange success:
 {"access_token":"<opaque-access-token>","token_type":"Bearer","expires_in":600,"id_token":"<ID-JWT>","scope":"openid profile"}
 ```
 
-Token claims and validation are defined below.
-
 **Deferred:** refresh fields: `grant_type=refresh_token`, `refresh_token`, optional `scope`.
 Omitting scope preserves the grant; supplied scopes must be a subset. Rotation
 cannot regain dropped scopes. Validate enabled client and family ownership.
 Refresh returns a new access and refresh token, expires_in, token_type and scope;
 omit ID tokens on refresh (OIDC permits this).
 [Architecture](ARCHITECTURE.md#refresh-and-revocation) owns atomic rotation and the
-unresolved duplicate/retry policy. Do not implement or publish refresh support
-until that policy and its protocol outcomes are resolved.
+unresolved duplicate/retry design gate.
 
 OAuth token errors are top-level JSON, for example:
 
@@ -136,10 +130,9 @@ Use standard errors/statuses: invalid_request, invalid_grant, invalid_scope,
 unauthorized_client, unsupported_grant_type; invalid_client uses HTTP 401 and an
 appropriate WWW-Authenticate challenge for failed Basic authentication. Dependency
 failure returns HTTP 503 with a safe operational error response and no tokens;
-this is an HTTP availability failure, not an additional OAuth token error code. A generic 503
-never proves rollback. An uncertain code-exchange commit or lost exchange success requires fresh
-authorization; refresh failure handling remains subject to its design gate. Define any explicit safe-retry
-signal before allowing bounded retries after confirmed rollback.
+this is an HTTP availability failure, not an additional OAuth token error code.
+Apply [transaction failure and retry rules](ARCHITECTURE.md#transactions-and-failures);
+refresh failure handling remains subject to its design gate.
 
 ## Token claims and validation
 
@@ -151,9 +144,8 @@ resolve its subject in the issuing client's sector context.
 
 ID tokens use `typ=JWT`, RS256 and the single integrating client as `aud`;
 include `iss`, the same pairwise `sub`, `iat`, `exp`, original `auth_time`
-and request `nonce`. The profile scope permits preferred_username.
+and request `nonce`. The profile scope also permits `preferred_username`.
 Lifetimes are owned by [Product](PRODUCT.md#sessions-and-failure-behavior).
-Subscription status is never a token claim.
 
 For ID tokens, validate signature, explicit RS256 allowlist, known key, exact configured issuer,
 claim types, expiry and issuance time with 30 seconds clock tolerance.
@@ -182,8 +174,9 @@ insufficient_scope where applicable.
 **Deferred:** implement after the first complete OIDC integration.
 
 Require Bearer access token with the same validation and crow.subscription scope.
-Return `{"subscriber":false}` before Stripe. This is a custom protected resource,
-not an OIDC claim. No caller-supplied user ID or public subscription writes.
+Return `{"subscriber":false}` before Stripe, following
+[Product subscription behavior](PRODUCT.md#subscriptions-and-deferred-scope).
+No caller-supplied user ID.
 
 ## Revocation: POST /oauth/revoke
 
@@ -198,16 +191,16 @@ report unsupported_token_type for unsupported token types as RFC 7009 specifies.
 The hint is advisory: ignore unrecognized hints and search supported token stores
 when the hinted lookup misses. An unsupported hint alone is not an error. A known
 access token may return unsupported_token_type; unknown tokens still receive 200.
-Dependency failure is 503, not a successful revocation. The app clears local state
-even on failure; existing access tokens expire naturally. This is app logout, not
-OIDC RP-initiated logout; discovery must not advertise end_session_endpoint.
+Dependency failure is 503, not a successful revocation. For
+[app logout](PRODUCT.md#sessions-and-failure-behavior), clear local state even on
+failure; existing access tokens expire naturally.
 
 ## Crow browser and portal endpoints
 
 These are same-origin internal browser handlers, not OAuth grants.
-Axum serves templates and accepts ordinary form submissions; HTMX may request
-HTML fragments. Full-page and enhanced requests use identical authorization and
+Apply [rendering requirements](ARCHITECTURE.md#services-and-trust-boundaries) and
 [browser security controls](ARCHITECTURE.md#browser-security-and-sessions).
+HTMX may request HTML fragments.
 Successful ordinary forms use a 303 redirect to a server-selected next page or
 validated callback. HTMX responses may use HX-Redirect for full navigation;
 never let submitted URLs select an unchecked redirect. Sensitive responses use
@@ -215,7 +208,7 @@ no-store, and responses varying by HX-Request must vary their cache key.
 
 GET /login without a bound app flow is portal login; /oauth/authorize starts app
 flows and routes to hosted UI. GET /register preserves a validated flow.
-Expired/invalid app flows require restart, never a fallback to portal login.
+Expired/invalid app flows require restart, following [Product login behavior](PRODUCT.md#login-and-consent).
 
 **Proposed:** internal browser handlers:
 
@@ -225,17 +218,16 @@ Expired/invalid app flows require restart, never a fallback to portal login.
 - GET /api/portal/account: render the signed-in user's own account.
 - POST /api/portal/logout: revoke the browser session and clear its cookie.
 
-Direct credential success continues to /account; app flows continue to consent
-or callback. Both establish the Crow browser session under Product's rules.
+Successful navigation follows [Product portal behavior](PRODUCT.md#portal-and-developer-apps).
 Never return app tokens to browser handlers. Flow state and identity binding
 follow [Architecture](ARCHITECTURE.md#authorization-state-machine).
 
 ## Developer management proposals
 
-**Proposed:** handler shapes below; Product owns management behavior.
-
-All routes require portal session; mutations additionally require CSRF and Origin.
-Ownership comes from stored owner UUID, never supplied request owner IDs.
+**Proposed:** handler shapes below; [Product](PRODUCT.md#portal-and-developer-apps)
+owns management behavior. All routes require a portal session and the
+[ownership checks](ARCHITECTURE.md#services-and-trust-boundaries) and
+[browser mutation controls](ARCHITECTURE.md#browser-security-and-sessions).
 Browser mutations use POST action routes accepting ordinary form submissions;
 no method override or JavaScript is required. Apply the browser response rules above.
 
@@ -245,17 +237,16 @@ no method override or JavaScript is required. Apply the browser response rules a
 | POST /api/portal/applications | name and redirect_uris; create owned app and initial secret, displayed once |
 | GET /api/portal/applications/{id} | Own configuration and secret metadata; no retrievable secret |
 | POST /api/portal/applications/{id}/update | name and/or redirect_uris; validate full callback policy |
-| POST /api/portal/applications/{id}/secrets | Create second secret if fewer than two active; return ID, created_at and plaintext once |
-| POST /api/portal/applications/{id}/secrets/{secret_id}/revoke | Revoke owned app's secret; do not revoke user families |
-| POST /api/portal/applications/{id}/disable | Block app operations and permanently revoke existing grants and refresh families |
-| POST /api/portal/applications/{id}/enable | Re-enable configuration; never restore revoked grants or families |
+| POST /api/portal/applications/{id}/secrets | Create secret under Product limits; return ID, created_at and plaintext once |
+| POST /api/portal/applications/{id}/secrets/{secret_id}/revoke | Revoke owned app's secret |
+| POST /api/portal/applications/{id}/disable | Disable app under Product revocation rules |
+| POST /api/portal/applications/{id}/enable | Re-enable app under Product revocation rules |
 
-No permanent app deletion, account editing/deletion or billing mutations in this
-milestone. Disabled apps can still be managed by their owner. Specify atomic
-callback changes versus in-flight flows before implementation; a removed callback
-must not be used for a later redirect/exchange. Durable disablement must remain
-effective through PostgreSQL state checks and transaction locking coordinated
-with exchange and refresh; cleanup alone is insufficient.
+Disabled apps can still be managed by their owner. Callback edits follow the
+[Product callback policy](PRODUCT.md#portal-and-developer-apps) and
+[authorization race controls](ARCHITECTURE.md#authorization-state-machine).
+Disablement follows [transaction controls](ARCHITECTURE.md#transactions-and-failures).
+No account editing/deletion or billing mutations are proposed here.
 
 ## Implementation and validation
 
@@ -266,5 +257,4 @@ Cover missing, malformed, stale and future auth_time and max_age=0 in the refere
 integration's verification scenarios. Extend the walkthrough with the
 selected refresh coordination policy when that milestone is implemented. Run applicable
 protocol/conformance tests and cross-client/token-substitution tests before claiming
-compatibility. Completion evidence belongs in [Implementation](IMPLEMENTATION.md). Dynamic registration, upstream Google/Discord login, public
-browser clients and OIDC logout are deferred; do not advertise them in discovery.
+compatibility. Completion evidence belongs in [Implementation](IMPLEMENTATION.md).
