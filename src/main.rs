@@ -1,4 +1,3 @@
-use axum::{Router, routing::get};
 use sqlx::postgres::PgPoolOptions;
 use std::{io, time::Duration};
 
@@ -23,9 +22,14 @@ async fn main() -> std::io::Result<()> {
         .await
         .map_err(|_| io::Error::other("PostgreSQL startup connectivity check failed"))?;
 
-    let app = Router::new()
-        .route("/health", get(|| async { "ok" }))
-        .with_state(db);
+    crow_auth::migrate(&db)
+        .await
+        .map_err(|_| io::Error::other("PostgreSQL migration failed"))?;
+    let origin = std::env::var("APP_ORIGIN")
+        .map_err(|_| io::Error::other("APP_ORIGIN must be set to an HTTPS origin"))?;
+    let app = crow_auth::app(db, &origin)
+        .await
+        .map_err(io::Error::other)?;
     let listener = tokio::net::TcpListener::bind("127.0.0.1:3000").await?;
 
     axum::serve(listener, app).await

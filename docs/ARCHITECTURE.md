@@ -12,8 +12,7 @@ security responsibilities remain Crow's.
 
 One Rust/Axum application owns accounts, app management, browser sessions,
 authorization, token issuance and resource APIs. It renders hosted and portal
-pages using templates with HTMX enhancements. The template library is not yet
-selected. Standard forms and redirects must work without HTMX; client-side state
+pages using templates with HTMX enhancements. Askama renders escaped HTML templates. Standard forms and redirects must work without HTMX; client-side state
 and HTMX headers are never authorization evidence.
 
 Pages, API, OAuth and discovery endpoints share one configured HTTPS origin.
@@ -196,3 +195,48 @@ sessions, flows/codes and grants before serving restored state.
 Any app/grant cache needs explicit invalidation and maximum staleness. Add caches,
 partitioning or services only when measurements justify them.
 [Implementation](IMPLEMENTATION.md) assigns verification to each milestone.
+
+## Account/session implementation decisions
+
+**Accepted for the account/session milestone:** Askama provides compile-time HTML
+escaping; Axum owns HTTP/form parsing; SQLx owns PostgreSQL transactions and
+migrations; RustCrypto Argon2 owns Argon2id hashing; the OS-backed rand generator
+owns random bytes; SHA-256 stores high-entropy session verifiers. Crow remains
+responsible for input policy, CSRF/Origin enforcement, deadlines, rotation and
+transaction boundaries. No OAuth/OIDC compatibility is claimed by these libraries.
+
+The configured `APP_ORIGIN` is an HTTPS origin without a path, query, credentials
+or fragment. A TLS reverse proxy can forward to the loopback HTTP listener.
+Cookies use the `__Host-crow` name, Path=/, Secure, HttpOnly and SameSite=Lax.
+Anonymous browser sessions last fifteen minutes and carry no account authority.
+Forms receive a domain-separated SHA-256 CSRF token derived from the random
+browser handle; only its session verifier is persisted. Every mutation requires
+that token, an exact matching Origin and a live database session. Missing Origin
+fails closed. HTMX uses ordinary complete pages and 303 redirects, with the same
+controls; no special fragment protocol or external scripts are needed initially.
+
+Successful registration/login locks the initiating session row, verifies that it
+is still live, revokes it and inserts a fresh eight-hour session in one READ
+COMMITTED transaction. Registration inserts the account in that transaction;
+PostgreSQL uniquely constrains normalized usernames. Logout takes the same row
+lock. A concurrent submission from another tab using the replaced handle fails;
+the user reloads the form. No grace alias restores a revoked handle. Account
+creation and cookie issuance happen only after confirmed commit. On uncertain
+commit, return a generic unavailable response without a new cookie. A lost
+registration response can leave an account created; login recovers access.
+Future authenticated flows must lock this same session before binding/completion
+and invalidate on rotation/logout; flows are not implemented in this milestone.
+
+Hashing uses Argon2id v19 with 19 MiB, two iterations and one lane, fresh 16-byte
+salts, and at most two concurrent blocking workers per process. Admission uses
+try-acquire with no waiting queue; overload returns 503. A permit remains held
+inside the blocking task even if its HTTP caller disconnects. Unknown usernames
+verify a dummy hash with the same costs. Benchmarking and distributed abuse
+limits remain public-exposure gates.
+
+The embedded SecLists Xato top-100,000 password dataset is checked locally,
+case-insensitively for blocklist matching only; the original password bytes are
+hashed unchanged. See data/README.md for source, checksum and refresh policy.
+This limited common/compromised list is prototype protection, not a claim to
+contain every compromised password. Expired/revoked rows remain fail-closed;
+cleanup is operational work and never the enforcement mechanism.

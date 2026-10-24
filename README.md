@@ -1,6 +1,7 @@
 # crow-auth
 
-Rust HTTP service using Axum and Tokio. Authentication is not implemented yet.
+Rust HTTP service using Axum and Tokio. Account registration, login and shared
+Crow browser sessions are implemented.
 
 ## Design documents
 
@@ -13,8 +14,9 @@ service with hosted login, browser SSO and backend-only app integrations.
 - [Implementation milestones](docs/IMPLEMENTATION.md)
 - [AI contributor instructions](AGENTS.md)
 
-The design documents describe planned behavior; the runnable implementation is
-the skeleton below. See [AGENTS.md](AGENTS.md) for document ownership and decision labels.
+The design documents describe planned behavior; the runnable implementation
+covers the account/session milestone below. See [AGENTS.md](AGENTS.md) for
+document ownership and decision labels.
 
 ## Development
 
@@ -41,6 +43,7 @@ export DATABASE_URL='postgres://<user>:<url-encoded-password>@127.0.0.1:5432/cro
 Then run:
 
 ```sh
+export APP_ORIGIN='https://crow.example'
 cargo run --locked
 ```
 
@@ -57,5 +60,41 @@ curl --fail http://127.0.0.1:3000/health
 ```
 
 Stop the local database with `docker stop crow-auth-postgres`. This disposable
-container does not retain data after removal. User tables and authentication
-flows are not included yet.
+container does not retain data after removal. Developer apps, OAuth/OIDC and
+recovery are not implemented yet.
+
+## Account/session prototype
+
+Startup applies versioned SQLx migrations. Configure `APP_ORIGIN` as the exact
+canonical HTTPS origin (no trailing slash) served by your TLS reverse proxy;
+forward to the loopback listener. Secure cookies intentionally require HTTPS.
+Do not expose this prototype publicly: shared abuse limits, hashing benchmarks,
+recovery/password replacement and operational readiness remain release gates.
+
+`GET /register` and `GET /login` render ordinary HTML forms. Registration creates
+an account and an eight-hour browser session; login rotates the browser handle.
+`GET /account` shows only the authenticated account. Logout uses a CSRF-protected
+POST and revokes only that browser session. No recovery is available. Anonymous
+form sessions expire after fifteen minutes. Every mutation requires the original
+cookie, form CSRF token and exact configured Origin. HTMX requests use identical
+full-page responses and security controls. There are no OAuth endpoints yet.
+
+Run the required checks:
+
+```sh
+cargo fmt --check
+cargo check --locked
+cargo clippy --locked --all-targets -- -D warnings
+cargo test --locked
+# Explicitly run the database suite against a disposable PostgreSQL instance:
+# TEST_DATABASE_URL uses the same connection-string format as DATABASE_URL.
+cargo test --locked --test browser -- --ignored
+```
+
+The database test requires `TEST_DATABASE_URL`, creates a unique isolated schema
+and drops it on success. It checks migrations, uniqueness and same-browser races,
+CSRF/Origin (including HTMX), rotation/fixation, expiry/logout, persistence across
+router recreation, transaction rollback and database failures. It is explicitly
+ignored by default so missing PostgreSQL cannot silently count as verification.
+See [implementation evidence](docs/IMPLEMENTATION.md) and the
+[security decisions](docs/ARCHITECTURE.md#accountsession-implementation-decisions).

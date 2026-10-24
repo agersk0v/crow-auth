@@ -217,7 +217,27 @@ GET /login without a bound app flow is portal login; /oauth/authorize starts app
 flows and routes to hosted UI. GET /register preserves a validated flow.
 Expired/invalid app flows require restart, never a fallback to portal login.
 
-**Proposed:** internal browser handlers:
+**Implemented for accounts/sessions:**
+
+- GET /login and GET /register: issue or reuse an anonymous/live browser session
+  and render a CSRF-bound form; query parameters are rejected until hosted flows
+  exist.
+- POST /api/hosted/login and POST /api/hosted/register: form fields username,
+  password and csrf; unknown/duplicate fields are rejected. Require the live
+  browser cookie and exact configured Origin; return 303 to /account on success.
+- GET /account and GET /api/portal/account: render the current account, otherwise
+  redirect to /login.
+- POST /api/portal/logout: form field csrf plus cookie and Origin; revoke the
+  session and clear its cookie, then return 303 to /login.
+
+Invalid form credentials/policy use HTML with HTTP 400; invalid CSRF, Origin or
+expired/revoked initiating sessions use HTTP 403; dependency/worker-admission
+failures use generic HTTP 503. Failed mutations issue no new session cookie.
+Full-page and HTMX requests follow this same protocol. Browser mechanics and
+transaction guarantees are owned by
+[Architecture](ARCHITECTURE.md#accountsession-implementation-decisions).
+
+**Proposed for future hosted authorization:** internal browser handlers:
 
 - POST /api/hosted/login and /api/hosted/register: username/password plus CSRF
   and an optional bound flow; enforce [Product account rules](PRODUCT.md#accounts).
