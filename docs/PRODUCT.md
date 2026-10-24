@@ -1,175 +1,247 @@
 # Crow Auth product definition
 
 This document owns Crow Auth's product scope and intended behavior. It separates
-the implemented baseline, agreed requirements, and unresolved decisions. An
-agreed requirement is planned work until its implementation is merged and
-verified; this document does not imply that the described features already exist.
+implemented functionality, agreed plans, and unresolved decisions. Planned
+features do not exist merely because they are described here.
 
-[README](../README.md) owns implemented setup, configuration, and verification
-commands. Detailed technical contracts and security rules will belong in
-`docs/ARCHITECTURE.md` and `docs/SECURITY.md` when those documents are created.
+[README](../README.md) owns implemented setup, configuration, and check commands.
+Detailed technical and security contracts will belong in `docs/ARCHITECTURE.md`
+and `docs/SECURITY.md` when those documents are created.
 
 ## Purpose
 
-Crow Auth is a shared authentication service for multiple applications, including
-applications built by external developers. Clerk is a reference for the product
-direction: applications can use a common identity service and hosted account
-pages instead of building their own authentication experience. Feature parity
-with Clerk is not an initial requirement.
+Crow Auth is an external identity and subscription service shared by multiple
+applications, including applications built by external developers. A person
+creates one Crow account and can use it to sign into any connected application.
+Clerk and signing into different apps with Google are references for the
+experience; compatibility or feature parity is not an initial requirement.
 
-Crow Auth is API-first. Hosted pages provide a convenient interface to the service;
-they must not be the only way to perform the supported authentication flows.
+Crow Auth owns the stable user ID, unique username, securely hashed password,
+and Crow subscription status. Connected applications own their application data
+and associate it with the Crow user ID. They do not need separate local account
+registration, usernames, passwords, or an independently generated user identity.
+Crow cannot enforce how external developers structure their databases.
+
+Crow Auth is API-first. Every supported account and authentication operation
+must be available through its API; hosted pages are an optional integration
+experience rather than a requirement for consuming applications. A button labeled
+"Continue with Crow" is optional branding, not a required UI component.
 
 ## Implemented baseline
 
-The repository currently contains a Rust HTTP service using Axum and Tokio, a
-SQLx PostgreSQL connection pool, and a startup `SELECT 1` connectivity check.
-`GET /health` returns `200` with the body `ok` and is an HTTP liveness check.
+The repository contains a Rust HTTP service using Axum and Tokio, a SQLx
+PostgreSQL connection pool, and a startup `SELECT 1` check. `GET /health` returns
+`200` with body `ok`; it is an HTTP liveness check rather than an ongoing database
+readiness check.
 
-Users, application registration, authentication, JWT issuance, hosted pages,
-subscriptions, the Go refresh-token service, and Redis integration are not
-implemented yet. PostgreSQL connectivity alone does not provide user storage.
+User storage, application registration, authentication, JWT issuance, Next.js
+pages, subscriptions, the Go refresh-token service, and Redis integration are
+not implemented yet. All following feature sections describe planned behavior.
 
-## Shared identity
+## Shared accounts and application data
 
-A person has one Crow identity across connected applications rather than a
-separate Crow account for every application. Initial sign-in uses a username and
-password. Users must be able to create an account, sign in, sign out, and access
-their account/profile through the supported interfaces.
+Initial registration and sign-in use a username and password. The same Crow
+account and stable user ID work across connected applications; visiting a second
+application does not require another Crow registration.
 
-A shared identity does not by itself grant an application access to all user data
-or to another application's configuration. Application permissions and the user
-information exposed to applications still need definition.
+Applications obtain the authenticated user's ID through validated tokens or an
+authenticated account API. They use that ID to retrieve their own application
+records. For example, Crow Fitness stores workout data against a Crow user ID;
+another app stores its own data against that same ID. Crow Auth does not store
+those applications' business data.
 
-## Developers and applications
+Shared identity does not grant access to another application's data or developer
+configuration. Only the user information permitted for an integration may be
+exposed; the exact profile fields and access rules remain to be defined.
 
-External developers with access to the Crow Auth API or frontend can register
-and configure connected applications. Integration is not limited to the Crow
-project owner or first-party applications. No separate manual developer approval
-requirement has been agreed.
+## Developers and application registration
 
-Applications can choose either a hosted authentication experience or their own
-interface backed entirely by Crow Auth's API. Developer access, application
-ownership, credentials, and permitted account operations must be defined before
-application management is implemented. Public access to a page must not be
-treated as permission to manage another developer's applications.
+Any developer with a Crow account can register an application through the API
+or frontend. No separate manual approval is required. The signed-in developer
+owns the application and is the only developer allowed to manage its initial
+configuration; teams and shared ownership are outside the initial scope.
 
-## Authentication interfaces
+Registration is lightweight:
 
-### Hosted authentication
+1. The developer provides an application name and exact allowed callback URLs.
+2. Crow assigns a public client ID identifying that application.
+3. The developer integrates using either Crow's hosted login or the direct API.
 
-An application can send a user to Crow Auth's hosted login UI, supplying a return
-URL in the request URL. After successful authentication, Crow Auth returns the
-user to that application so it can establish authenticated access.
+A client ID is public identification, not a secret or proof of ownership.
+Application-management requests require authentication and ownership checks.
+Direct API authentication also requires a registered application.
 
-JWT access tokens are an agreed requirement. The redirect handoff remains
-unresolved: the original request was to include the JWT in the return URL. The
-recommended alternative is a short-lived, single-use authorization code that the
-application exchanges for tokens, with PKCE, request state, and registered
-callback URLs. This recommendation has not yet been approved. Do not implement
-the redirect protocol until the handoff and callback validation rules are agreed.
+For hosted login, Crow validates the requested callback against the URLs
+registered for that client using exact matching, not an arbitrary supplied URL,
+request origin, or referrer. Production callbacks use HTTPS; controlled localhost
+callbacks may be supported for development. Detailed development URL rules
+belong in the security contract.
+
+Separate proof of domain ownership, such as a DNS TXT record or hosted verification
+file, is not required initially. Callback registration does not prove domain
+control or establish that an application is trustworthy.
+
+## Login and registration flows
+
+### Sign into Crow itself
+
+Opening `/login` without application-login parameters signs the user into Crow.
+After successful login, the user reaches `/account`. Opening a protected Crow
+account or developer page while signed out requires Crow sign-in first.
+
+This is distinct from logging into an external application. Crow's own pages
+must not require an external callback URL.
+
+### Hosted application login
+
+An application opens Crow's `/login` page with its client ID, a registered callback
+URL, request state, and a PKCE challenge. Callback details remain associated with
+the pending authentication flow while the user logs in or registers.
+
+1. Crow validates the application and callback before continuing.
+2. The user authenticates with their Crow username and password, or registers
+   one Crow account if they do not already have one.
+3. Crow redirects to the validated callback with a short-lived, single-use
+   authorization code and the request state. It does not put JWTs or refresh
+   tokens in the callback URL.
+4. The application validates the returned state and exchanges the code using
+   its PKCE verifier to obtain tokens.
+5. The receiving API validates the JWT, including its intended audience, before
+   using the Crow user ID to access application data.
+
+Codes are bound to the requesting application, callback, and PKCE challenge.
+A code cannot be redeemed for another application or reused after a successful
+exchange. Exact endpoints and protocol details belong in the technical contracts.
+
+Incomplete or invalid application-login parameters produce an error; they must
+not silently fall back to Crow's own login or redirect to an unvalidated URL.
+For application login, the callback is required. A plain visit to `/login`
+without application-login parameters remains the Crow account flow.
 
 ### Direct API authentication
 
-Applications must be able to perform authentication entirely through HTTP API
-endpoints without using Crow Auth's hosted pages. This includes the initial
-account and authentication flows, with JWT access tokens returned in response
-bodies rather than requiring a browser redirect.
+Applications can register users and authenticate entirely through HTTP API
+requests without using Crow's frontend. Direct login accepts a username,
+password, and application identification and returns tokens as JSON. It does
+not accept a callback or redirect tokens to a URL.
 
-Exact endpoints, payloads, application authentication, token audiences, and error
-contracts remain to be defined. API availability does not imply that untrusted
-clients receive developer credentials or unrestricted account access.
+Applications that collect Crow credentials directly handle those credentials;
+Crow's hosted login avoids exposing passwords to a connected application's
+login form. Client authentication and which application types may use direct
+password login remain security decisions. A public client ID alone must not
+allow an application to obtain tokens intended for a different application.
 
-### Hosted account pages
+The exact endpoint paths, request/response payloads, and error contracts are not
+yet defined. `/login` above identifies the hosted page, not a finalized API route.
 
-Crow Auth provides a hosted account/profile page. The initial frontend consists
-of hosted login and account pages, with the account-creation entry point needed
-for the agreed registration flow. Embedded UI components are outside the initial
-scope.
+## Hosted frontend
 
-The API is the primary product interface. Profile fields, permitted edits, and
-any developer-facing frontend screens remain to be specified; a broad admin
-dashboard is not an agreed initial requirement.
+The frontend uses Next.js. The initial page scope is:
 
-## Tokens and sessions
+| Page | Purpose |
+| --- | --- |
+| `/login` | Crow sign-in or hosted application sign-in, depending on validated flow parameters |
+| `/register` | Create a shared Crow account and continue the pending flow, or enter the Crow account area |
+| `/account` | Show the user's Crow ID, username, and subscriber status |
+| `/applications` | List the developer's applications and register an application |
+| `/applications/{id}` | Manage an owned application's name and registered callbacks; show its client ID |
 
-JWT access tokens represent authenticated access for connected applications.
-A Go microservice, kept in this repository, handles refresh tokens using Redis
-for refresh-token state. The main authentication API uses Rust and Axum.
+Developer pages use the same Crow account, not a separate developer identity.
+The frontend calls the service APIs; it must not be the only interface for account
+or application management. Profile edits and any additional fields remain to be
+defined. Embedded components and a broad administrative dashboard are not initial
+requirements. Billing screens await the billing decisions below.
 
-The exact division of responsibilities between these services remains a design
-task. Access-token lifetime, refresh rotation and expiry, session persistence,
-logout scope, revocation, and behavior during Redis outages must be agreed
-before the token flows are implemented.
+## Tokens, sessions, and service responsibilities
 
-Sharing an identity does not yet establish automatic single sign-on between
-applications or immediate global logout. Those behaviors require explicit
-session and token rules.
+JWT access tokens contain the stable Crow user ID in `sub` and identify their
+intended audience in `aud`. In the initial model each connected application has
+its own audience. A token issued for one application must not authenticate the
+user to another application's API. Receiving APIs must validate Crow's signature,
+issuer, expiration, and expected audience. Changing an audience invalidates the
+signature.
+
+Connected APIs should be able to verify signatures using Crow's published public
+signing keys rather than making a Crow request for every application request.
+A protected account API provides permitted user information when needed.
+
+The main authentication API uses Rust and Axum. A Go microservice in this same
+repository handles refresh tokens using Redis for refresh-token state.
+PostgreSQL stores persistent identity, application, and subscription data.
+
+Token lifetimes, signing-key rotation, refresh rotation and expiry, service
+communication, Redis persistence/outage behavior, and logout/revocation rules
+remain to be defined. Logout must be supported, but its exact scope and effect
+on already-issued JWTs are not yet agreed.
+
+Shared accounts are required. Reusing a Crow browser session to avoid entering
+credentials across applications (single sign-on), consent behavior, and global
+logout still need explicit session rules before implementation; they are not
+implied by sharing the same user ID.
 
 ## Subscriptions and roles
 
-Stripe provides subscriptions tied to Crow Auth rather than subscriptions owned
-separately by each connected application. The initial subscription concept is a
-subscriber role associated with the Crow identity.
+Stripe provides subscriptions tied to Crow Auth, rather than separate subscriptions
+owned by each connected application. The initial subscription concept is a
+subscriber role associated with the Crow identity. All features remain unlocked;
+there is no initial paid-feature gating, plan-based access restriction, or paid
+API limit.
 
-All features remain unlocked initially. The subscriber role does not introduce
-paid feature restrictions, API limits, or a plan-based entitlement system.
+The following remain unresolved:
 
-The following are unresolved:
+- Who purchases subscriptions and how Stripe customers map to Crow accounts.
+- Whether the subscriber role is assigned automatically from Stripe, manually,
+  or through both mechanisms.
+- Pricing, plans, trials, and purchase or billing-management interfaces.
+- Cancellation, failed-payment, refund, and subscription-expiry behavior.
+- How applications read the subscriber role and when changes become visible.
 
-- Who purchases a subscription and how the Stripe customer maps to a Crow account.
-- Whether the subscriber role is assigned from Stripe automatically, manually,
-  or through both methods.
-- Pricing, plans, trials, and the purchase and billing-management interfaces.
-- The effect of cancellation, failed payments, refunds, and subscription expiry.
-- How applications can read the role and how quickly role changes become visible.
-
-Stripe Checkout and Customer Portal are possible implementation choices, not
-approved requirements. Do not infer billing lifecycle or role transitions from
-this document.
+Stripe Checkout and Customer Portal are options, not agreed requirements. Do not
+invent subscription lifecycle rules or role transitions during implementation.
 
 ## Agreed technology constraints
 
-| Component | Agreed choice |
+| Component | Choice |
 | --- | --- |
-| Main HTTP API | Rust and Axum |
-| Persistent user storage | PostgreSQL, accessed by the Rust service through SQLx |
-| Access tokens | JWT |
+| Main HTTP API | Rust, Axum, and Tokio |
+| Hosted frontend | Next.js |
+| Persistent storage | PostgreSQL, accessed by the Rust API through SQLx |
+| Access tokens | JWT, with application-specific audiences |
+| Hosted token handoff | Authorization code with PKCE and registered callbacks |
 | Refresh-token handling | Go microservice in this repository |
 | Refresh-token state | Redis |
 | Subscriptions | Stripe |
 
-These choices constrain the implementation. Schemas, service boundaries,
-communication protocols, signing keys, password hashing, and deployment details
-belong in the architecture and security documents.
+Schemas, deployment, password hashing parameters, API contracts, and protocol
+implementation belong in the architecture and security documents. This product
+scope does not yet claim OAuth or OpenID Connect standards compliance.
 
 ## Outside the initial scope
 
-- Password recovery and reset; recovery email requirements are not defined.
+- Password recovery/reset; recovery email requirements are undefined.
 - Social login, passwordless login, and multi-factor authentication.
 - Embedded authentication UI components.
-- Organizations, teams, and application-specific authorization roles.
-- Paid feature gating and a full plan/entitlement system.
-- Full Clerk compatibility or feature parity.
+- Organizations, teams, and application-specific business authorization roles.
+- Paid feature gating and a full entitlement system.
+- Full Clerk or Google compatibility or feature parity.
 
-These exclusions describe the initial scope, not permanent product restrictions.
-They require separate agreement before implementation.
+These exclusions concern the initial scope and can change through later product
+decisions. The subscriber role remains in scope.
 
 ## Decisions needed before implementation
 
-Resolve decisions for the affected feature before implementing it; independent,
-agreed work can continue without inventing answers for unrelated features.
+Resolve decisions for an affected feature before implementing it. Independent
+work within agreed scope can continue.
 
-1. Define username rules, uniqueness, password requirements, and initial profile
-   fields, including whether any email address is collected.
-2. Define developer access, application ownership, application credentials, and
-   the user information each application may receive.
-3. Approve the hosted redirect handoff and callback validation rules.
-4. Define JWT validation and audiences, session behavior, refresh-token handling,
-   and sign-out/revocation across applications.
-5. Define subscription ownership, subscriber-role assignment, billing interfaces,
-   and lifecycle behavior before implementing billing.
+1. Username uniqueness rules, password policy, profile fields and edits, and
+   whether an email address is collected.
+2. Direct API client authentication and permitted client types, user-information
+   access, and any consent requirements.
+3. Detailed callback rules, authorization-code contracts, and PKCE/state handling.
+4. Token lifetimes, refresh rotation, browser sessions/single sign-on, signing-key
+   management, service boundaries, and logout/revocation behavior.
+5. Subscription purchasing, subscriber-role assignment, and billing lifecycle.
 
-Keep approved plans separate from implemented behavior as the service grows.
-Update this document when product decisions change; keep setup commands in the
-README and detailed technical contracts in their dedicated documents.
+Update this document when product decisions change and when planned features
+become implemented. Keep setup instructions in the README and technical details
+in their dedicated documents.
