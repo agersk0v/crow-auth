@@ -14,6 +14,8 @@ revocation use database transactions.
 - [Product behavior](docs/PRODUCT.md)
 - [Architecture and security](docs/ARCHITECTURE.md)
 - [Draft API contract](docs/API_CONTRACT.md)
+- [Implementation milestones](docs/IMPLEMENTATION.md)
+- [AI contributor instructions](AGENTS.md)
 
 OAuth/OIDC endpoints, discovery and authentication are not implemented yet.
 These describe planned behavior; the runnable implementation remains the skeleton below.

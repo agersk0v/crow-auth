@@ -25,6 +25,21 @@ with no composition rules. Never trim, normalize, lowercase or truncate password
 Reject common/compromised passwords. Password recovery is unavailable and must
 be disclosed during registration.
 
+Email-based password recovery is planned for a later milestone. It may be delayed
+during the prototype, but must be designed and implemented before public production
+use. Initially no email is collected and recovery remains unavailable. Before recovery
+launch, define verified email enrollment for existing and new accounts, secure
+address changes, single-use expiring reset links, abuse protection, generic reset
+responses and session invalidation after reset. Never trust an unverified address
+or silently attach one during a forgotten-password request.
+
+Initially every app receives the same public user UUID. This makes shared identity
+simple, but unrelated developers can correlate a user if they compare identifiers.
+It does not grant access to each other's data. Keep this initial choice explicit;
+review it before onboarding unrelated external developers. Pairwise OIDC subjects
+(a different stable identifier per app/sector) are the alternative and would require
+an identifier-migration plan. Do not change subject semantics during implementation.
+
 ## Login and consent
 
 1. The app backend starts authorization at `/oauth/authorize`, binding state,
@@ -154,15 +169,13 @@ never blindly retry. Missing refresh records require login.
 
 Before Stripe, subscription reads return non-subscriber for everyone. Subscription
 status stays out of tokens and gates no features. Future Stripe subscriptions
-belong to Crow. Cancellation retains status through the paid period. Failed
-payment retains existing status for seven days; unresolved failure removes it.
-Duplicate events neither restart grace nor grant status to a non-subscriber.
+belong to Crow; detailed billing behavior is deferred until that milestone.
 
 Before billing implementation, define purchaser/customer ownership, eligible
 states, plans/prices/trials, interfaces, refunds, payment recovery, lifecycle
 precedence, webhook idempotency and reconciliation. Billing does not block auth.
 
-External/social/passwordless login, MFA, recovery, profile/password changes,
+External/social/passwordless login, MFA, email recovery, profile/password changes,
 account deletion, organizations/teams, app business roles, paid feature gating,
 embedded components and a broad admin dashboard are deferred. Define their
 contracts before exposure. Clerk/Google feature parity is not a requirement.

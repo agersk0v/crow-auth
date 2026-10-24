@@ -8,6 +8,9 @@ Core are the chosen initial protocol. This is a planned contract, not implemente
 compatibility or certification. Use OAuth 2.0 security best practice (RFC 9700),
 PKCE (RFC 7636), discovery, Bearer token usage and RFC 7009 revocation.
 Portal/browser-internal JSON shapes remain proposals; standard wire formats do not.
+Standards requirements are mandatory. Crow-specific protocol choices remain draft
+until implementation review; changing accepted behavior requires updating Product
+and its enforcement/acceptance checks together.
 
 ## Discovery and public keys
 
@@ -53,6 +56,18 @@ Support nonnegative integer `max_age` in seconds: reauthenticate when the origin
 authentication is older; zero always requires fresh authentication. Include the
 actual credential authentication time as `auth_time` in ID tokens. Reject unsupported
 prompt values, combinations and request features with appropriate standard errors.
+
+| prompt | Behavior |
+| --- | --- |
+| omitted | Reuse valid SSO; obtain missing consent |
+| login | Require fresh authentication |
+| consent | Force consent; authenticate if necessary |
+| login consent (either order) | Require both fresh authentication and consent |
+| none | No UI; return login_required or consent_required when necessary |
+| Any other value, duplicate value, or combination with none | invalid_request |
+
+If both authentication and consent are missing, return login_required first.
+For prompt=none with max_age=0, return login_required without UI.
 Do not advertise request objects, dynamic client registration or other extensions.
 
 Scopes: `openid` releases `sub`; `profile` releases `preferred_username`;
@@ -67,6 +82,7 @@ Successful completion redirects using query response mode with `code` and origin
 `state` (and issuer identification per RFC 9207). Codes last 60 seconds and bind
 user, client, callback, nonce, scopes, authentication time and PKCE challenge.
 Denial returns `error=access_denied` and original state to a validated callback.
+Include `iss` on success and applicable error redirects as required by RFC 9207.
 Invalid client/callback requests display a local error, never redirect. Other
 errors use OAuth/OIDC authorization error parameters, never custom JSON wrappers.
 Preserve existing callback query parameters through proper URL encoding.
@@ -84,6 +100,8 @@ Code exchange fields: `grant_type=authorization_code`, `code`, `redirect_uri`,
 bindings. Consume the code and create the refresh family (only if offline access
 was granted) in one PostgreSQL transaction. Prepare signed tokens before commit;
 return them only after confirmed commit. Signing failure rolls back everything.
+Code replay returns invalid_grant and follows Architecture's bound replay/grant
+revocation rules; invalid client/PKCE attempts must not revoke legitimate grants.
 
 Example success with offline access:
 
@@ -124,7 +142,8 @@ signal before allowing bounded retries after confirmed rollback.
 ## UserInfo: GET /oauth/userinfo
 
 Require `Authorization: Bearer <access-token>`, no additional client secret.
-Validate signature, issuer, Crow resource audience, expiry, enabled client_id and
+Validate signature, issuer, Crow resource audience, expiry, enabled client_id,
+absence of replay revocation for the token's grant and
 openid scope; derive user from sub. Return `{"sub":"<UUID>"}` and include
 `preferred_username` when profile is granted. Clients must compare this sub to
 the ID token's sub. Never return another user's data or accept an ID token.
@@ -144,6 +163,9 @@ corresponding refresh family, retaining spent-token evidence. Return HTTP 200
 with an empty body for revoked, already revoked or unknown tokens, without
 revealing other clients' sessions. Only refresh-token revocation is supported;
 report unsupported_token_type for unsupported token types as RFC 7009 specifies.
+The hint is advisory: ignore unrecognized hints and search supported token stores
+when the hinted lookup misses. An unsupported hint alone is not an error. A known
+access token may return unsupported_token_type; unknown tokens still receive 200.
 Dependency failure is 503, not a successful revocation. The app clears local state
 even on failure; existing access JWTs expire naturally. This is app logout, not
 OIDC RP-initiated logout; discovery must not advertise end_session_endpoint.

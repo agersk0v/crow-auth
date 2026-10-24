@@ -6,7 +6,8 @@ Pre-implementation design. [PRODUCT.md](PRODUCT.md) owns product behavior;
 [API_CONTRACT.md](API_CONTRACT.md) proposes endpoint shapes; [README](../README.md)
 describes runnable code. Only the Rust/Axum service, PostgreSQL pool, startup
 connectivity check and health endpoint exist. The decisions below are agreed,
-not implemented. Wire-level proposals remain subject to implementation review.
+not implemented. Standards requirements are mandatory. Crow-specific protocol
+choices and internal endpoint shapes remain draft until implementation review.
 
 ## Services and trust boundaries
 
@@ -37,6 +38,8 @@ origin checks and framing protection. CORS is not authentication.
 Username/password rules are authoritative in PRODUCT.md. Enforce normalized
 username uniqueness in PostgreSQL. Hash passwords with Argon2id, unique random
 salts and stored cost parameters; benchmark costs before public deployment.
+Run hashing on a bounded blocking-worker pool, away from Tokio async workers.
+Bound concurrent hashes and queued requests to protect CPU and memory.
 Count password length consistently as Unicode code points, without normalization.
 Apply a bounded request size that permits the full supported UTF-8 password.
 Select the common/compromised-password dataset and update process before release;
@@ -88,6 +91,20 @@ authentication time server-side after credential verification; never accept a
 browser-supplied user ID. Consume completion once after required consent.
 Registration authenticates the pending flow without a second login.
 
+Use explicit stages: pending authentication, pending consent, completed, denied
+and expired. A flow can reach only one terminal stage; code creation and flow
+completion are atomic. Fresh authentication may advance directly to completion
+when no consent is needed. Recheck session validity and identity before completion
+for both SSO and credential flows. Logout or replacement of the associated browser
+session invalidates its unfinished authenticated flows. Never silently change a
+flow's authenticated user. Support independent flows in multiple tabs using
+opaque flow IDs bound to a browser secret; an ID alone grants no authority.
+
+Recheck enabled app state and current callback registration at completion and
+exchange. Serialize callback removal/disablement with these operations using a
+consistent lock order. If removal wins, show a local error; never redirect to the
+removed URL. A response already committed before removal cannot be recalled.
+
 Consent discloses requested scopes, app name and destination
 domain. Remember consent by user/client and permission version. Do not infer app
 trustworthiness from registration. Decline consumes the flow and returns
@@ -117,6 +134,14 @@ authorization; never assume a timeout means rollback. Do not persist plaintext
 response tokens for replay. Specify transaction isolation, lock ordering, unique
 constraints and cleanup before implementing this flow.
 
+Retain a verifier of each consumed code and its issued-grant relationship until
+the grant can no longer be used. Deny replay with invalid_grant. For a replay
+authenticated as the original client and passing the original callback and PKCE
+bindings, revoke its refresh family, if any, and mark its access-token grant
+revoked. Crow resource APIs check that grant state until token expiry. Invalid
+client or binding attempts must not revoke another grant. Existing app-local
+sessions cannot be cleared remotely by this mechanism.
+
 ## JWT contract and key rotation
 
 Access JWTs last ten minutes and use `alg=RS256`, `kid`, `typ=at+jwt`.
@@ -129,8 +154,8 @@ minutes. `profile` permits `preferred_username`; subscription stays in its API.
 
 Validate signatures, explicit RS256 allowlist, known key, exact configured issuer,
 claim types and time bounds with 30 seconds clock tolerance. Resource APIs accept
-only access tokens with their resource audience, appropriate scopes and an enabled
-issuing `client_id`; ID tokens cannot authorize them. Clients validate ID-token
+only access tokens with their resource audience, appropriate scopes, an enabled
+issuing `client_id` and no replay-revoked grant; ID tokens cannot authorize them. Clients validate ID-token
 issuer, client audience, expiry and nonce against their initiating browser session.
 UserInfo `sub` must equal the ID token's `sub`. Never use a refreshed ID token to
 establish a new browser login. No app token authorizes portal management.
@@ -173,6 +198,14 @@ a lost refresh response requires login rather than a blind retry. App logout
 revokes its current family and clears local app state; existing JWTs expire
 naturally. Other applications/devices remain signed in.
 
+This is an intentional initial security/availability tradeoff: a duplicate may be
+theft, so Crow rejects both copies at the cost of restarting legitimate sessions.
+Fresh authorization may use existing SSO, subject to consent/freshness rules; it
+does not always require another password entry. Before external integrations,
+provide a reference backend showing distributed refresh serialization, crash/lost
+response handling and reauthorization. Retry grace or response replay requires a
+separate reviewed design; do not add either implicitly.
+
 Fail closed on unavailable PostgreSQL or failed writes; missing records require
 login. Never reconstruct sessions from unverified tokens. App disablement and
 refresh must coordinate through the same durable app state and transaction
@@ -192,6 +225,19 @@ failures and separate registration/exchange/refresh limits. Choose numeric limit
 trusted proxy rules and limiter-outage behavior before public exposure. Keep
 security logs free of credentials and define retention/access policies.
 
+Before deployment, budget database connections across replicas, define timeouts,
+graceful shutdown, migrations, metrics and a separate readiness endpoint. /health
+remains HTTP liveness. Throttling must enforce a shared budget across instances.
+App/grant-state caching needs explicit invalidation and maximum staleness; do not
+silently weaken disablement or replay revocation. Add caches, partitioning or
+additional services only when measurements justify them.
+
+Before protocol implementation, evaluate maintained OAuth/OIDC provider libraries
+and existing providers. Record the selected approach, maintenance status, covered
+protocol features and Crow-owned security responsibilities. Prefer maintained
+protocol implementations where suitable; do not invent cryptography or claim
+that a JWT signing library implements an identity provider.
+
 Remaining implementation details: account/session migrations and indexes; exact
 Argon2 costs; password blocklist source; endpoint proposal review; exchange failure
 transaction boundaries, lock ordering and constraints; PostgreSQL durability and
@@ -210,6 +256,8 @@ precedence, webhook idempotency and reconciliation. No billing writes are expose
   SSO intact. Session fixation and cross-browser flow completion fail.
 - Apps cannot collect Crow passwords or use direct password grants.
 - Callback/PKCE/state validation, single-use codes and expiry work under races.
+- Bound multi-tab flows, logout/account changes, callback-removal races and code
+  replay revocation behave as specified; invalid bindings cannot revoke grants.
 - Failed or concurrent exchanges issue no tokens before commit or duplicate families.
 - Client credentials alone reveal no user; JWTs cannot authorize portal management.
 - Wrong resource/ID-token audiences, other-user access and non-owner management fail.
