@@ -92,12 +92,21 @@ share a database transaction. Return tokens only after code consumption is
 confirmed and the refresh session exists. Concurrent exchanges must not create
 multiple usable families for one code.
 
-Decision pending before exchange implementation: choose consume-once with fresh
-authorization after any subsequent failure, or a durable coordinated exchange
-with bounded internal retries. Specify write ordering, signing failure, uncertain
-write outcomes, crash cleanup and orphan-session handling for the chosen policy.
-A lost public success response requires fresh authorization. Never assume a
-timeout proves a write failed or make a successfully exchanged code reusable.
+Confirmed policy: consume once and restart authorization after failure.
+After validation, atomically consume the code in PostgreSQL and confirm commit
+before creating its Redis refresh family. Only the winning code consumer may
+create the family. Do not restore consumed codes or retry session creation after
+an uncertain result. Signing, Redis or response failure after consumption returns
+no tokens and requires a fresh hosted login. An uncertain PostgreSQL commit also
+requires fresh authorization; never assume a timeout proves rollback.
+A code may be retried within its original lifetime only if non-consumption is
+confirmed, for example a confirmed rollback before session creation.
+
+A lost public success response requires fresh authorization. Best-effort revoke
+a known orphan family after a failed exchange; failed cleanup must not make the
+code reusable. Orphan records remain bounded by session expiry. Specify exact
+signing order, database locking/constraints and orphan cleanup before coding;
+no durable exchange-recovery state machine or replay of token responses is needed.
 
 ## JWT contract and key rotation
 
@@ -164,7 +173,7 @@ security logs free of credentials and define retention/access policies.
 
 Remaining implementation details: account/session migrations and indexes; exact
 Argon2 costs; password blocklist source; endpoint proposal review; cross-store
-exchange failure policy; atomic Redis rotation; disablement checks and races;
+exchange locking/signing order and orphan cleanup; atomic Redis rotation; disablement checks and races;
 Redis durability, capacity and restore invalidation; PostgreSQL recovery;
 JWKS cache bounds; consent
 versioning; trusted proxy configuration; numeric limits and deployment secrets.
