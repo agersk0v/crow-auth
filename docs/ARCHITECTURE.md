@@ -153,10 +153,15 @@ naturally. Other applications/devices remain signed in.
 
 Fail closed on unavailable Redis or failed writes; missing records require
 login. Never reconstruct sessions from unverified tokens. PostgreSQL remains
-authoritative for app configuration and enabled state. Before implementation,
-choose how refresh checks current app state and how disable/re-enable prevents
-old families from becoming usable again, including concurrent requests and
-failed Redis revocation. Cleanup alone is insufficient.
+authoritative for app configuration and enabled state. Every refresh validates
+client credentials and reads current app enabled state directly from PostgreSQL;
+do not use cached Redis app status. If PostgreSQL cannot complete this check,
+return 503 before consuming or rotating the refresh token. Reject disabled apps.
+
+The per-request lookup is confirmed. Before implementation, define concurrency
+control for disablement racing with refresh, and durable invalidation so
+disable/re-enable cannot revive old families when Redis revocation fails.
+A lookup alone does not resolve these races; cleanup alone is insufficient.
 
 Before deployment, define Redis persistence, noeviction capacity handling,
 expiration of family/token evidence and restart/restore invalidation. Session
@@ -173,7 +178,7 @@ security logs free of credentials and define retention/access policies.
 
 Remaining implementation details: account/session migrations and indexes; exact
 Argon2 costs; password blocklist source; endpoint proposal review; cross-store
-exchange locking/signing order and orphan cleanup; atomic Redis rotation; disablement checks and races;
+exchange locking/signing order and orphan cleanup; atomic Redis rotation; disablement races and durable invalidation;
 Redis durability, capacity and restore invalidation; PostgreSQL recovery;
 JWKS cache bounds; consent
 versioning; trusted proxy configuration; numeric limits and deployment secrets.
