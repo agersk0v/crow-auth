@@ -1,10 +1,17 @@
 # OAuth 2.0 and OpenID Connect API contract draft
 
+## Prototype status
+
+An earlier account/session prototype is implemented on this branch. It differs
+from the accepted verified-account milestone below; see
+[prototype behavior, gaps and verification](PROTOTYPE.md). The accepted design
+remains authoritative. No complete milestone verification is claimed.
+
 ## Status
 
-**Accepted:** planned protocol choices unless labeled otherwise. Internal browser
-and management endpoint shapes are **Proposed**. See [AGENTS.md](../AGENTS.md)
-for document ownership and decision labels.
+This document owns milestone endpoint and protocol details, including browser
+and management handlers. **Accepted** means chosen planned behavior; **Deferred**
+is outside this milestone. Neither implies implementation.
 
 Follow OIDC Core, OAuth 2.0 security best practice (RFC 9700), PKCE (RFC 7636),
 discovery, Bearer token usage and RFC 7009 revocation for supported features.
@@ -30,7 +37,8 @@ using absolute URLs. Publish only implemented, verified capabilities:
 - `code_challenge_methods_supported`: `["S256"]`
 - `scopes_supported`: `["openid", "profile"]` initially. Add `crow.subscription`
   and `offline_access` only when their respective milestones are supported.
-- `claims_supported`: the ID-token/UserInfo claims actually implemented below.
+- `claims_supported`: `["iss", "sub", "aud", "iat", "exp", "auth_time", "nonce", "preferred_username"]`
+  when the milestone is implemented. No email claim or email scope is supported.
 
 `GET /.well-known/jwks.json` exposes public RSA keys only: `kid`, `kty=RSA`,
 `use=sig`, `alg=RS256`, `n`, `e`. Follow Architecture key rotation/cache rules.
@@ -50,9 +58,12 @@ explicit migration procedure exists.
 Required: `response_type=code`, `client_id`, exact registered `redirect_uri`,
 `scope` including `openid`, unpredictable browser-session-bound `state`, `nonce`,
 `code_challenge` and `code_challenge_method=S256`. Crow requires state and nonce
-as its security policy. Validate PKCE syntax, length, S256 and the verifier/challenge relationship per
-RFC 7636. Clients must generate verifiers with cryptographically secure randomness;
+as its security policy. Validate PKCE challenge syntax (43 base64url characters without padding) and S256;
+validate the verifier/challenge relationship at exchange per RFC 7636. Clients must generate verifiers with cryptographically secure randomness;
 Crow cannot measure their entropy from a submitted value.
+Bound state/nonce to 1–512 ASCII unreserved characters; require nonempty client_id
+and reject request URLs longer than 8 KiB. Client backends generate state and nonce
+from at least 32 random bytes each and compare exact strings.
 Only confidential web clients are supported; no implicit or password grants.
 
 Validate the complete request before creating a browser-bound 15-minute flow.
@@ -67,7 +78,15 @@ explicit consent cannot complete silently.
 Support nonnegative integer `max_age` in seconds: reauthenticate when the original
 authentication is older; zero always requires fresh authentication. Include the
 actual credential authentication time as `auth_time` in ID tokens. Reject unsupported
-prompt values, combinations and request features with appropriate standard errors.
+prompt values/combinations and unsupported request parameters with invalid_request.
+Reject duplicate parameters, response_mode other than query, request/request_uri,
+claims, resource and unsupported display/ui_locales/login_hint parameters.
+Use unsupported_response_type for response_type other than code. First validate
+client and redirect without navigation; only then return parameter errors to that
+callback. Disabled/unknown clients and unregistered callbacks produce local HTTP
+400. Expired, consumed or browser-mismatched flows show local HTTP 400 with a
+restart link and never emit a code. An authorization cancellation with a still
+valid bound flow returns access_denied; dependency failure shows local HTTP 503.
 
 | prompt | Behavior |
 | --- | --- |
@@ -93,7 +112,9 @@ user, client, callback, nonce, scopes, authentication time and PKCE challenge.
 Denial returns `error=access_denied` and original state to a validated callback.
 Include `iss` on success and applicable error redirects as required by RFC 9207.
 Invalid client/callback requests display a local error, never redirect. Other
-errors use OAuth/OIDC authorization error parameters, never custom JSON wrappers.
+errors use OAuth/OIDC authorization error parameters, never custom JSON wrappers. Never reflect raw request values in error_description;
+use stable safe messages. Unknown scopes use invalid_scope, missing/malformed
+parameters invalid_request, and user denial access_denied.
 Preserve existing callback query parameters through proper URL encoding.
 
 ## Token: POST /oauth/token
@@ -103,6 +124,9 @@ Use `application/x-www-form-urlencoded` and HTTP Basic client authentication
 in URLs or require custom Crow authentication headers. Reject duplicate parameters
 and multiple authentication mechanisms. Responses use `Cache-Control: no-store`
 and `Pragma: no-cache`. Redact credentials, tokens and callback queries in logs.
+
+Reject a verifier outside 43–128 ASCII unreserved characters or an incorrect
+S256 digest with invalid_grant. Reject missing required fields with invalid_request.
 
 Code exchange fields: `grant_type=authorization_code`, `code`, `redirect_uri`,
 `code_verifier`. Validate client, enabled state, exact callback, expiry and all
@@ -132,14 +156,16 @@ OAuth token errors are top-level JSON, for example:
 {"error":"invalid_grant","error_description":"The grant is invalid or expired."}
 ```
 
-Use standard errors/statuses: invalid_request, invalid_grant, invalid_scope,
+Use HTTP 400 for standard errors: invalid_request, invalid_grant, invalid_scope,
 unauthorized_client, unsupported_grant_type; invalid_client uses HTTP 401 and an
 appropriate WWW-Authenticate challenge for failed Basic authentication. Dependency
-failure returns HTTP 503 with a safe operational error response and no tokens;
-this is an HTTP availability failure, not an additional OAuth token error code. A generic 503
+failure returns HTTP 503 with `{"message":"Service unavailable."}` and no tokens;
+this body is operational diagnostic information; clients treat the HTTP status
+as an availability failure, not a retryable OAuth grant outcome. A generic 503
 never proves rollback. An uncertain code-exchange commit or lost exchange success requires fresh
-authorization; refresh failure handling remains subject to its design gate. Define any explicit safe-retry
-signal before allowing bounded retries after confirmed rollback.
+authorization; refresh failure handling remains subject to its design gate.
+Milestone-one clients never retry code exchange, even after confirmed rollback;
+no safe-retry signal is offered.
 
 ## Token claims and validation
 
@@ -156,7 +182,10 @@ Lifetimes are owned by [Product](PRODUCT.md#sessions-and-failure-behavior).
 Subscription status is never a token claim.
 
 For ID tokens, validate signature, explicit RS256 allowlist, known key, exact configured issuer,
-claim types, expiry and issuance time with 30 seconds clock tolerance.
+claim types, expiry and issuance time with 30 seconds clock tolerance. Require
+nonempty sub, iat <= now+30, exp > iat, and exactly the client ID as string aud;
+Crow does not issue multi-audience ID tokens. Header kid is required; ignore
+untrusted jku/x5u and never select algorithms from the token alone.
 ID tokens cannot authorize resource APIs.
 Clients validate ID-token client audience and nonce against the initiating
 browser session, after validating state at the callback. Store requested max_age
@@ -173,9 +202,13 @@ the ID-token sub. Key provisioning and rotation belong to
 
 Require `Authorization: Bearer <access-token>`, no additional client secret.
 Apply [token validation](#token-claims-and-validation) and require openid scope.
-Return `{"sub":"<pairwise-opaque-subject>"}` and include preferred_username
-when profile is granted. Use RFC 6750 Bearer errors/challenges, including
-insufficient_scope where applicable.
+The access-token resource audience is the fixed configured UserInfo endpoint URL;
+no audience selection parameter is supported. Return `{"sub":"<pairwise-opaque-subject>"}` and include preferred_username
+when profile is granted. Use RFC 6750: missing credentials receive HTTP 401 with `WWW-Authenticate: Bearer`
+and no error field; invalid/expired/revoked/wrong-audience credentials receive 401
+with `Bearer error="invalid_token"`; insufficient scope receives 403 with
+`Bearer error="insufficient_scope", scope="openid"`. Malformed/multiple credential
+methods receive 400 invalid_request. Success is JSON with Cache-Control: no-store.
 
 ## Subscription: GET /api/subscription
 
@@ -217,44 +250,71 @@ GET /login without a bound app flow is portal login; /oauth/authorize starts app
 flows and routes to hosted UI. GET /register preserves a validated flow.
 Expired/invalid app flows require restart, never a fallback to portal login.
 
-**Implemented for accounts/sessions:**
+**Accepted:** internal browser handlers:
 
-- GET /login and GET /register: issue or reuse an anonymous/live browser session
-  and render a CSRF-bound form; query parameters are rejected until hosted flows
-  exist.
-- POST /api/hosted/login and POST /api/hosted/register: form fields username,
-  password and csrf; unknown/duplicate fields are rejected. Require the live
-  browser cookie and exact configured Origin; return 303 to /account on success.
-- GET /account and GET /api/portal/account: render the current account, otherwise
-  redirect to /login.
-- POST /api/portal/logout: form field csrf plus cookie and Origin; revoke the
-  session and clear its cookie, then return 303 to /login.
-
-Invalid form credentials/policy use HTML with HTTP 400; invalid CSRF, Origin or
-expired/revoked initiating sessions use HTTP 403; dependency/worker-admission
-failures use generic HTTP 503. Failed mutations issue no new session cookie.
-Full-page and HTMX requests follow this same protocol. Browser mechanics and
-transaction guarantees are owned by
-[Architecture](ARCHITECTURE.md#accountsession-implementation-decisions).
-
-**Proposed for future hosted authorization:** internal browser handlers:
-
-- POST /api/hosted/login and /api/hosted/register: username/password plus CSRF
+- POST /api/hosted/login and /api/hosted/register: username/password (registration additionally requires email) plus CSRF
   and an optional bound flow; enforce [Product account rules](PRODUCT.md#accounts).
 - POST /api/hosted/consent: approve/deny an authenticated pending flow.
 - GET /api/portal/account: render the signed-in user's own account.
 - POST /api/portal/logout: revoke the browser session and clear its cookie.
 
-Direct credential success continues to /account; app flows continue to consent
-or callback. Both establish the Crow browser session under Product's rules.
+Verified-account password login continues to /account; bound app login continues
+to consent or callback. These logins establish the Crow browser session under Product's rules.
 Never return app tokens to browser handlers. Flow state and identity binding
 follow [Architecture](ARCHITECTURE.md#authorization-state-machine).
 
-## Developer management proposals
+## Account lifecycle browser contracts
 
-**Proposed:** handler shapes below; Product owns management behavior.
+All paths below are **Accepted**, same-origin form handlers using the browser
+security rules above. GET forms issue CSRF state; POST requires it and Origin.
+Passwords, action tokens and secrets are never query parameters on POST. Email
+links use a 256-bit random token in the GET query; immediately exchange it for a
+short-lived server-bound form context and 303 to a clean URL. Use no-store,
+Referrer-Policy: no-referrer, no third-party assets and redacted access logs on
+these routes. GET never verifies, resets or deletes an account.
 
-All routes require portal session; mutations additionally require CSRF and Origin.
+| Method/path | Fields and committed outcome |
+| --- | --- |
+| POST /api/hosted/register | username, email, password, optional flow; generic 303 to /verify-email; no login cookie |
+| GET /verify-email | Instructions/resend form; token link prepares confirmation form |
+| POST /api/hosted/verify-email | Bound action context; activate account; 303 /login, preserving only valid original-browser flow |
+| POST /api/hosted/resend-verification | email; generic 303 /verify-email |
+| GET /recover | Email request form |
+| POST /api/hosted/recover | email; generic 303 /recover/sent |
+| GET /reset-password | Token link prepares new-password form |
+| POST /api/hosted/reset-password | Bound action context, new_password; consume, invalidate account credentials; 303 /login |
+| POST /api/portal/password | current_password, new_password; replace/invalidate; 303 /login |
+| POST /api/portal/reauthenticate | current_password; refresh server-side sensitive-action timestamp only; 303 /account |
+| POST /api/portal/account/delete | confirmation=Delete account, fresh reauthentication; delete and invalidate; 303 /account-deleted |
+
+Ordinary login uses username/password. Invalid login returns generic HTTP 400
+for unknown, wrong-password and deleted accounts; no identity disclosure. Valid
+credentials for pending accounts show verification guidance without a session.
+Validation failures return HTML 400 with safe field errors, invalid action contexts
+400 with restart guidance, unauthenticated portal access 303 /login, stale sensitive
+reauthentication 403 with reauthentication link, CSRF/Origin failure 403, throttling
+429 and dependency failure 503. Never return successful redirect before commit.
+Register/reset/change enforce identical password rules. Invalid inputs never echo
+passwords/tokens. Unknown/deleted recovery emails produce the same status, page and
+asynchronous timing path as active emails. Failed delivery does not undo a committed
+registration; resend can recover. Deletion commit uncertainty shows a safe 503;
+retry resolves to signed-out/deleted state if committed, otherwise requires fresh
+authentication. No endpoint returns another user's account or a raw Crow token.
+
+## Developer management
+
+**Accepted:** handler shapes below; Product owns management behavior.
+
+All routes require an active verified portal session; mutations additionally require
+CSRF and Origin. App IDs are opaque UUIDs distinct from public client IDs; ownership
+checks use app IDs. Successful mutations use 303 to the owned app page; creation
+and secret rotation redirect to a no-store once-only secret page bound to that
+owner/session, with plaintext erased from transient storage on first view or after
+five minutes. Failed validation or the two-active-secret limit returns HTML 400;
+unknown/non-owned objects 404, stale reauthentication 403, dependency failure 503.
+Revocation/disable/enable are idempotent for the owner. All mutations and active
+secret counting serialize under the app row lock. Revoking the last secret is
+allowed, with a warning; the owner can issue a replacement through the portal.
 Ownership comes from stored owner UUID, never supplied request owner IDs.
 Browser mutations use POST action routes accepting ordinary form submissions;
 no method override or JavaScript is required. Apply the browser response rules above.
@@ -270,10 +330,11 @@ no method override or JavaScript is required. Apply the browser response rules a
 | POST /api/portal/applications/{id}/disable | Block app operations and permanently revoke existing grants and refresh families |
 | POST /api/portal/applications/{id}/enable | Re-enable configuration; never restore revoked grants or families |
 
-No permanent app deletion, account editing/deletion or billing mutations in this
-milestone. Disabled apps can still be managed by their owner. Specify atomic
-callback changes versus in-flight flows before implementation; a removed callback
-must not be used for a later redirect/exchange. Durable disablement must remain
+No permanent app deletion, profile editing or billing mutations in this
+milestone. Account deletion is specified in the lifecycle contracts above. Disabled apps can still be managed by their owner. Callback edits take the app row lock used by completion and exchange; a removed
+callback must not be used for a later redirect/exchange. Recheck registration
+immediately before committing completion/exchange; if removal commits first,
+completion shows a local error and exchange returns invalid_grant. Durable disablement must remain
 effective through PostgreSQL state checks and transaction locking coordinated
 with exchange and refresh; cleanup alone is insufficient.
 

@@ -1,46 +1,16 @@
-# crow-auth
+# Crow Auth
 
-Rust HTTP service using Axum and Tokio. Account registration, login and shared
-Crow browser sessions are implemented.
+A small identity provider for adding **Sign in with Crow** to independent apps
+using OpenID Connect.
 
-## Design documents
+The current implementation includes PostgreSQL migrations, HTTP liveness and an
+earlier account/session prototype. It does not yet meet the accepted verified-email
+account lifecycle or two-app milestone; see [prototype gaps](docs/PROTOTYPE.md).
 
-Crow Auth is a planned OAuth 2.0/OpenID Connect identity provider and subscription
-service with hosted login, browser SSO and backend-only app integrations.
+## Run locally
 
-- [Product behavior](docs/PRODUCT.md)
-- [Architecture and security](docs/ARCHITECTURE.md)
-- [Draft API contract](docs/API_CONTRACT.md)
-- [Implementation milestones](docs/IMPLEMENTATION.md)
-- [AI contributor instructions](AGENTS.md)
-
-The design documents describe planned behavior; the runnable implementation
-covers the account/session milestone below. See [AGENTS.md](AGENTS.md) for
-document ownership and decision labels.
-
-## Development
-
-Install a stable Rust toolchain and PostgreSQL (or Docker). To start a local database (Bash):
-
-```sh
-read -rsp 'Local PostgreSQL password: ' POSTGRES_PASSWORD; echo
-export POSTGRES_PASSWORD
-docker run --name crow-auth-postgres --rm -d \
-  -e POSTGRES_USER=crow_auth -e POSTGRES_PASSWORD -e POSTGRES_DB=crow_auth \
-  -p 127.0.0.1:5432:5432 postgres:17
-docker exec crow-auth-postgres pg_isready -U crow_auth -d crow_auth
-unset POSTGRES_PASSWORD
-```
-
-Wait until `pg_isready` reports that the database accepts connections. Set
-`DATABASE_URL` in your shell using your local credentials (URL-encode special
-characters in the username and password). This is a placeholder, not a working credential:
-
-```sh
-export DATABASE_URL='postgres://<user>:<url-encoded-password>@127.0.0.1:5432/crow_auth'
-```
-
-Then run:
+With stable Rust supporting edition 2024 and a running PostgreSQL database, set
+`DATABASE_URL` to your local connection string, then run:
 
 ```sh
 export APP_ORIGIN='https://crow.example'
@@ -48,22 +18,24 @@ cargo run --locked
 ```
 
 The server listens on `127.0.0.1:3000`. `GET /health` returns `ok`.
-At startup it connects a SQLx PostgreSQL pool, runs `SELECT 1`, and stores the pool
-in Axum application state. Missing configuration or an unavailable database stops
-startup with an error that does not include credentials. `/health` is a basic HTTP
-liveness endpoint; it does not check ongoing database health.
 
-```sh
-cargo check --locked
-cargo test --locked
-curl --fail http://127.0.0.1:3000/health
-```
+## Documentation
 
-Stop the local database with `docker stop crow-auth-postgres`. This disposable
-container does not retain data after removal. Developer apps, OAuth/OIDC and
-recovery are not implemented yet.
+- [Product](PRODUCT.md): purpose and basic scope.
+- [Architecture](ARCHITECTURE.md): technical structure.
+- [First milestone specification](docs/PRODUCT.md): account lifecycle, SSO and app management.
+- [Security design](docs/ARCHITECTURE.md): sessions, persistence and enforcement.
+- [OIDC and browser contracts](docs/API_CONTRACT.md): endpoints and validation.
+- [Implementation and acceptance](docs/IMPLEMENTATION.md): build order, readiness and two-app scenario.
+- [Agent guidance](AGENTS.md): working in this repository.
 
-## Account/session prototype
+The first milestone requires a verified account to sign into two backend apps
+through one Crow browser session without a second credential prompt. Recovery,
+deletion, app ownership and failure cases are specified; the complete milestone
+remains planned. Prototype evidence is not milestone acceptance.
+
+## Prototype setup and verification
+
 
 Startup applies versioned SQLx migrations. Configure `APP_ORIGIN` as the exact
 canonical HTTPS origin (no trailing slash) served by your TLS reverse proxy;
@@ -97,4 +69,4 @@ CSRF/Origin (including HTMX), rotation/fixation, expiry/logout, persistence acro
 router recreation, transaction rollback and database failures. It is explicitly
 ignored by default so missing PostgreSQL cannot silently count as verification.
 See [implementation evidence](docs/IMPLEMENTATION.md) and the
-[security decisions](docs/ARCHITECTURE.md#accountsession-implementation-decisions).
+[prototype decisions and gaps](docs/PROTOTYPE.md).
