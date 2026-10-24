@@ -210,8 +210,13 @@ callback changes versus in-flight flows before implementation; a removed callbac
 must not be used for a later redirect/exchange. Durable disablement must remain
 effective across PostgreSQL app state and Redis refresh state, including
 concurrent requests, Redis failure and later re-enablement. Refresh checks
-PostgreSQL directly on every request. Define race coordination and durable
-session invalidation before implementation; cleanup alone is insufficient.
+PostgreSQL directly on every request and compares the Redis family's original
+session version to the current app session_version. Disablement atomically marks
+the app disabled and increments session_version in PostgreSQL. Re-enablement
+does not reset it; refresh never upgrades a family's version. Mismatched families
+yield invalid_grant even if Redis cleanup failed. Initial session creation
+copies the version from its validated exchange. Define race coordination before
+implementation; version checks enforce revocation independently of cleanup.
 
 ## Rust session storage boundaries
 
