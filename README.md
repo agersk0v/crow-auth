@@ -4,16 +4,19 @@ Rust HTTP service using Axum and Tokio. Authentication is not implemented yet.
 
 ## Design documents
 
-Crow Auth is a planned shared identity and subscription service with hosted login,
+Crow Auth is a planned OAuth 2.0/OpenID Connect identity provider and subscription
+service with hosted login,
 backend-only app integrations and a separate account/developer portal.
+Rust/Axum owns authentication and token signing; PostgreSQL stores accounts,
+authorization flows, portal sessions and refresh sessions. Refresh rotation and
+revocation use database transactions.
 
-- [Product](docs/PRODUCT.md): behavior, permissions, lifetimes and scope.
-- [Architecture](docs/ARCHITECTURE.md): Rust/PostgreSQL/Redis responsibilities,
-  security enforcement, milestone checklist and acceptance checks.
-- [API draft](docs/API_CONTRACT.md): proposed endpoints, credentials and payloads.
+- [Product behavior](docs/PRODUCT.md)
+- [Architecture and security](docs/ARCHITECTURE.md)
+- [Draft API contract](docs/API_CONTRACT.md)
 
-These describe planned behavior. Next.js, authentication, Redis integration and
-Stripe are not implemented; the runnable implementation is the skeleton below.
+OAuth/OIDC endpoints, discovery and authentication are not implemented yet.
+These describe planned behavior; the runnable implementation remains the skeleton below.
 
 ## Development
 
