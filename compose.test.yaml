@@ -1,0 +1,18 @@
+# Standalone test stack: never combine with compose.yaml.
+services:
+  db-test:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: crow_auth_test
+      POSTGRES_DB: crow_auth_test
+      POSTGRES_PASSWORD: ${TEST_POSTGRES_PASSWORD:?Set TEST_POSTGRES_PASSWORD in .env}
+    ports:
+      - "127.0.0.1:${TEST_POSTGRES_PORT:-55432}:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U crow_auth_test -d crow_auth_test"]
+      interval: 2s
+      timeout: 5s
+      retries: 15
+      start_period: 5s
