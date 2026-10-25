@@ -58,6 +58,21 @@ development file. The current Rust tests only check startup configuration; no
 application database integration suite is implemented yet. To smoke-test the
 service against this database, set `DATABASE_URL` to the test URL for that run.
 
+## Continuous integration
+
+GitHub Actions runs formatting, compilation, Clippy, tests and a PostgreSQL 17
+startup/HTTP health smoke test on pull requests to `main`, pushes to `main`, and
+merge-queue groups. The workflow can also be started manually. To reproduce the
+smoke check locally with a disposable database:
+
+```sh
+DATABASE_URL="$TEST_DATABASE_URL" bash .github/scripts/smoke-test.sh
+```
+
+In a GitHub ruleset for `main`, require the `Rust checks` status check and pull
+requests before merging. Adding the workflow does not configure that repository
+setting. No application code changes are included with this CI setup.
+
 ## Documentation
 
 - [Product](PRODUCT.md): purpose and basic scope.
