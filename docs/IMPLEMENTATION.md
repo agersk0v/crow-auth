@@ -7,8 +7,9 @@ canonical account identifiers and unique reservations, pending/active schema sta
 security versions, Argon2id with bounded workers/queue, and local blocklist
 provisioning. Startup still exposes only GET /health; it now applies migrations.
 No registration/verification, account cleanup, mail, browser sessions, OAuth
-endpoints or example apps exist. This is a partial foundation, not completion of
-checklist item 1 or the verified-account/two-app milestone.
+endpoints or example apps exist. The account/password foundation increment is
+complete; the remaining foundations and verified-account/two-app milestone are
+pending.
 
 Foundation verification (2026-10-25): all required Rust checks passed; five unit
 tests cover input rules, Unicode/password-byte preservation, salts/costs,
@@ -35,35 +36,52 @@ This document owns build order and evidence. **Accepted** means chosen planned
 behavior; **Unresolved** marks a future decision; **Deferred** is outside this
 milestone. None implies implementation. Follow [AGENTS.md](../AGENTS.md) for checks.
 
-## Review findings and resolved decisions
+## Milestone decisions
 
-| Baseline gap/conflict | Resolution and authoritative source |
+| Accepted behavior or boundary | Authoritative source |
 | --- | --- |
-| Main simplified documentation and removed the old docs directory | Preserve root overviews and contributor guidance; link them to this requested detailed milestone specification |
-| Product said no email and deferred recovery/deletion; requested milestone requires all three | Mandatory verified email, recovery/change and deletion included; [Accounts](PRODUCT.md#accounts). User confirmed verification and owned-app deletion policy |
-| API said no account deletion; management/browser routes merely proposed | Accepted form contracts, including lifecycle; [API](API_CONTRACT.md#account-lifecycle-browser-contracts) |
-| Registration was treated as authenticated login | Pending registration creates no SSO; verification then password login required; [Accounts](PRODUCT.md#accounts) |
-| Browser/CSRF mechanics, library choices and transaction ordering were unresolved | Explicit [Architecture](ARCHITECTURE.md) choices; no blank design gate before feature work |
-| Local session expiry was unspecified; logout could be confused with global logout | Eight-hour absolute example app sessions; explicit [session effects](PRODUCT.md#sessions-and-failure-behavior), no global propagation |
-| Callback removal and disablement races lacked executable policy | Row locks/rechecks and permanent grant revocation; [transactions](ARCHITECTURE.md#transactions-and-failures) |
-| No reproducible two-app walkthrough or requirement mapping | Procedure and acceptance matrix below; evidence must be recorded when implemented |
-| Refresh retry behavior remains unresolved | Refresh/offline_access and revocation endpoint stay deferred and unadvertised; not a blocker for milestone one |
+| Verified email, recovery, password change and deletion are required | [Accounts](PRODUCT.md#accounts) and [browser contracts](API_CONTRACT.md#account-lifecycle-browser-contracts) |
+| Registration creates no SSO session; verification must be followed by password login | [Accounts](PRODUCT.md#accounts) |
+| Browser/CSRF checks, library responsibilities and transaction ordering are specified | [Architecture](ARCHITECTURE.md) |
+| Example app sessions expire after eight hours; logout has no global propagation | [Session effects](PRODUCT.md#sessions-and-failure-behavior) |
+| Callback removal and app disablement serialize with completion/exchange; revoked grants stay revoked | [Transactions](ARCHITECTURE.md#transactions-and-failures) |
+| Refresh/offline_access and the revocation endpoint are deferred and unadvertised | [Refresh policy](ARCHITECTURE.md#refresh-and-revocation) |
 
-Earlier Accepted choices are retained except the explicit lifecycle scope changes
-above. Proposed endpoint labels have been replaced by accepted contracts. Standards
-requirements remain mandatory; raise any discovered incompatibility with its source
-and recommended resolution before changing behavior.
+Standards requirements remain mandatory; raise any discovered incompatibility
+with its source and recommended resolution before changing behavior.
 
 ## Ordered implementation checklist
 
-1. **Foundations:** add reviewed libraries from Architecture, migrations and configured
-   issuer/mail/signing keys; implement account/app lock order, security versions,
-   expiry checks, durable shared throttling, encrypted transactional mail outbox
-   and redacted logs. Enforce schema uniqueness and credential verifier storage.
-2. **Account lifecycle:** build standard forms, pre-auth CSRF/Origin checks,
-   registration, verification, resend, login, recovery, password change, deletion
-   and pending-account cleanup. Test concurrent consumption/replacement/deletion,
-   failure rollback, mail retry and backup deletion replay before marking complete.
+1. **Foundations and registration:** deliver the following increments in order.
+   Account/app locks, security-version checks and expiry enforcement belong with
+   the operations that need them; add configured issuer/signing keys before OIDC
+   issuance. Review maintained libraries as each increment adds them.
+
+   - [x] **Account/password foundations:** versioned account migrations, canonical
+     identifiers and unique reservations, pending/active schema state, security
+     versions, bounded Argon2id and local blocklist provisioning. Evidence is
+     recorded above; a schema version column alone does not enforce revocation.
+   - [ ] **Verification and mail primitives (next):** purpose-bound, hashed,
+     single-use verification tokens; encrypted transactional mail outbox;
+     configured sender/link origin and encryption key; delivery retries, resend
+     invalidation and expired pending-account cleanup. Serialize account changes
+     and token consumption under the specified lock order. Test expiry, concurrent
+     consumption/resend/cleanup, rollback and mail retry against disposable PostgreSQL
+     and a local SMTP capture inbox.
+   - [ ] **Hosted registration and verification:** escaped forms, pre-auth CSRF
+     and Origin checks, durable shared throttling and redacted logs; initialize
+     the password service with the provisioned blocklist. Commit account, action
+     and outbox together; use generic email-conflict responses. Confirm activation
+     only by POST and create no authenticated session. Demonstrate registration
+     through captured mail to activation, including scanner GETs, expired/replaced
+     links, duplicate submissions and dependency failures. This does not complete
+     the account lifecycle or SSO milestone.
+
+2. **Remaining account lifecycle:** implement password login alongside the Crow
+   session increment below, then recovery, password change and deletion. Reuse
+   the browser/action/delivery protections above. Test concurrent replacement/deletion,
+   credential invalidation, failure rollback and backup deletion replay before
+   marking complete. Implement original-browser flow continuation with authorization.
 3. **Crow session and portal:** implement rotation, eight-hour absolute expiry,
    logout, per-flow browser binding and sensitive-action reauthentication. Test
    fixation, account changes, tab isolation and logout/flow races.
@@ -89,7 +107,7 @@ and recommended resolution before changing behavior.
 
 ## Reproducible end-to-end acceptance procedure
 
-This is a specified future test fixture, not runnable in the current skeleton.
+This is a specified future test fixture, not runnable in the current implementation.
 Implementation must supply a compose/test harness implementing these exact setup
 inputs and actions; no production credentials or provider account is required.
 
@@ -174,8 +192,9 @@ Owners of behavior are Product, API and Architecture; this matrix defines checks
 
 ## Outstanding limitations and later work
 
-No source implementation or integration evidence is delivered by this documentation
-change. Example backends/harness and deployment runbooks must still be built. Library
+Only the account/password foundations have implementation evidence recorded above;
+account lifecycle and OIDC/SSO integration evidence remain outstanding. Example
+backends/harness and deployment runbooks must still be built. Library
 versions, Argon2 cost above the specified minimum, mail provider, connection/worker
 budgets and infrastructure timeouts need validation on the target deployment; they
 do not change the accepted behavior. Do not expose publicly before release gates pass.
