@@ -1,0 +1,12 @@
+{# Renders an escaped confirmation form with verification token and CSRF fields. #}
+{% extends "layout.html" %}
+{% block title %}Verify your email — Crow{% endblock %}
+{% block content %}
+<h1>Verify your email</h1>
+<p>Confirm your email address. You will still need to sign in with your password.</p>
+<form method="post" action="/api/hosted/verify-email">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <input type="hidden" name="token" value="{{ token }}">
+  <button type="submit">Verify email</button>
+</form>
+{% endblock %}

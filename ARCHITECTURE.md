@@ -14,6 +14,8 @@ transactional mail outbox and a separate SMTP worker deliver verification
 links. Resend atomically replaces old links and queued mail. `account-cleanup`
 removes expired pending accounts and releases reservations.
 [Mail operation](docs/MAIL.md) documents configuration and guarantees.
+Signed pre-auth/CSRF protection and escaped hidden-token templates are available
+as library components; [browser foundations](docs/BROWSER.md) describes their use.
 No account HTTP handlers are implemented yet.
 
 Hosted account pages, app management and OpenID Connect are planned to live in

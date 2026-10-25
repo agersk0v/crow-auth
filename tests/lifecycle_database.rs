@@ -412,7 +412,12 @@ async fn resend_cleanup_and_cross_operation_races() {
         verify(&db, &old),
         resend(&db, id, &mail)
     );
-    assert!(cleaned.unwrap());
+    // SKIP LOCKED may defer cleanup while verification/resend holds the account.
+    // Once both have completed, the expired reservation must be removable.
+    if !cleaned.unwrap() {
+        assert!(cleanup_expired_one(&db).await.unwrap());
+    }
+    assert!(!exists(&db, id).await);
     assert_eq!(verified, Err(VerificationError::Invalid));
     assert_eq!(resent, Err(MailError::InvalidAction));
     // Active accounts survive even after their former pending deadline.

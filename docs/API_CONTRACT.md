@@ -6,7 +6,11 @@ This document owns milestone endpoint and protocol details, including browser
 and management handlers. **Accepted** means chosen planned behavior; **Deferred**
 is outside this milestone. Neither implies implementation.
 
-The milestone contracts are accepted specifications; implementation is pending.
+The milestone contracts are accepted specifications. Internal account/mail and
+signed pre-auth/CSRF primitives exist, but the browser, OAuth and
+portal endpoints below remain unimplemented. The HTTP service exposes only
+GET /health; see [browser foundations](BROWSER.md) and
+[implementation evidence](IMPLEMENTATION.md) for current status.
 The current server exposes only `GET /health`. See
 [implementation status and evidence](IMPLEMENTATION.md#status-and-readiness).
 
@@ -265,21 +269,25 @@ follow [Architecture](ARCHITECTURE.md#authorization-state-machine).
 All paths below are **Accepted**, same-origin form handlers using the browser
 security rules above. GET forms issue CSRF state; POST requires it and Origin.
 Passwords, action tokens and secrets are never query parameters on POST. Email
-links use a 256-bit random token in the GET query; immediately exchange it for a
-short-lived server-bound form context and 303 to a clean URL. Use no-store,
-Referrer-Policy: no-referrer, no third-party assets and redacted access logs on
-these routes. GET never verifies, resets or deletes an account.
+links carry a 256-bit random action token in the GET query. GET can render the
+confirmation form directly with separate hidden action-token and CSRF fields;
+no server-held form context or pre-render clean redirect is required. The token
+therefore remains in the initial URL and form until POST. Use no-store,
+Referrer-Policy: no-referrer, no third-party assets and redacted query/body/access
+logs. Only protected POST consumes the action and redirects to a token-free page.
+GET never verifies, resets or deletes an account. Signed pre-auth cookies are
+stateless; their expiry never extends action-token deadlines.
 
 | Method/path | Fields and committed outcome |
 | --- | --- |
 | POST /api/hosted/register | username, email, password, optional flow; generic 303 to /verify-email; no login cookie |
 | GET /verify-email | Instructions/resend form; token link prepares confirmation form |
-| POST /api/hosted/verify-email | Bound action context; activate account; 303 /login, preserving only valid original-browser flow |
+| POST /api/hosted/verify-email | token and action-specific CSRF; activate account; 303 /login, preserving only valid original-browser flow |
 | POST /api/hosted/resend-verification | email; generic 303 /verify-email |
 | GET /recover | Email request form |
 | POST /api/hosted/recover | email; generic 303 /recover/sent |
 | GET /reset-password | Token link prepares new-password form |
-| POST /api/hosted/reset-password | Bound action context, new_password; consume, invalidate account credentials; 303 /login |
+| POST /api/hosted/reset-password | token, action-specific CSRF, new_password; consume, invalidate account credentials; 303 /login |
 | POST /api/portal/password | current_password, new_password; replace/invalidate; 303 /login |
 | POST /api/portal/reauthenticate | current_password; refresh server-side sensitive-action timestamp only; 303 /account |
 | POST /api/portal/account/delete | confirmation=Delete account, fresh reauthentication; delete and invalidate; 303 /account-deleted |
@@ -287,16 +295,18 @@ these routes. GET never verifies, resets or deletes an account.
 Ordinary login uses username/password. Invalid login returns generic HTTP 400
 for unknown, wrong-password and deleted accounts; no identity disclosure. Valid
 credentials for pending accounts show verification guidance without a session.
-Validation failures return HTML 400 with safe field errors, invalid action contexts
+Validation failures return HTML 400 with safe field errors, invalid action tokens
 400 with restart guidance, unauthenticated portal access 303 /login, stale sensitive
 reauthentication 403 with reauthentication link, CSRF/Origin failure 403, throttling
 429 and dependency failure 503. Never return successful redirect before commit.
-Register/reset/change enforce identical password rules. Invalid inputs never echo
-passwords/tokens. Unknown/deleted recovery emails produce the same status, page and
+Register/reset/change enforce identical password rules. Validation errors never echo passwords or tokens; confirmation forms may carry
+the emailed token only in the escaped hidden field described above. Unknown/deleted recovery emails produce the same status, page and
 asynchronous timing path as active emails. Failed delivery does not undo a committed
 registration; resend can recover. Deletion commit uncertainty shows a safe 503;
 retry resolves to signed-out/deleted state if committed, otherwise requires fresh
-authentication. No endpoint returns another user's account or a raw Crow token.
+authentication. No endpoint exposes another user's account or returns raw Crow session/app tokens.
+Emailed action tokens may appear only in their GET link and escaped hidden POST
+field under the protections above.
 
 ## Developer management
 

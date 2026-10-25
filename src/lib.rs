@@ -1,6 +1,7 @@
 //! Exposes account, password and verification primitives and versioned migrations.
 
 pub mod accounts;
+pub mod browser;
 pub mod mail;
 pub mod password;
 pub mod policy;

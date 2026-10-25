@@ -1,0 +1,8 @@
+{# Renders escaped messages and a fixed restart link. #}
+{% extends "layout.html" %}
+{% block title %}{{ title }}{% endblock %}
+{% block content %}
+<h1>{{ title }}</h1>
+<p>{{ message }}</p>
+<p><a href="/register">Restart registration</a></p>
+{% endblock %}

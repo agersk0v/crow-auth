@@ -10,8 +10,8 @@ Account/password and verification/mail foundations are implemented: initial and
 replacement verification actions, atomic activation, encrypted transactional mail,
 a separate SMTP worker, and expired pending-account cleanup. No registration or
 verification HTTP routes, browser sessions, OAuth endpoints or example apps exist.
-**Next: hosted registration and verification**, including browser protections and
-shared throttling. The verified-account/two-app milestone remains pending.
+**In progress: hosted registration and verification.** Internal browser-security
+foundations are available; shared throttling and hosted handlers are next. The verified-account/two-app milestone remains pending.
 
 Foundation verification (2026-10-25): all required Rust checks passed; five unit
 tests cover input rules, Unicode/password-byte preservation, salts/costs,
@@ -110,6 +110,35 @@ internal integration checks. Hosted forms, pre-auth CSRF/Origin enforcement,
 durable browser throttling and scanner-GET/confirmation-POST behavior are the next
 increment. These checks do not establish a usable registration flow, login, SSO,
 production SMTP delivery, hashing benchmarks or release readiness.
+
+## Hosted browser foundations (first PR for issue #21)
+
+Implemented: signed pre-auth cookies with 30-minute absolute expiry, action-bound
+HMAC CSRF, strict Origin checks, escaped Askama layouts/messages/confirmation forms
+and security-header/body-limit middleware. CSRF validation needs no database lookup.
+The form carries the emailed token and a separate CSRF token in hidden fields.
+No pre-auth or verification-context tables, cleanup, five-minute context deadline
+or pre-render clean redirect are required. The original emailed action remains in
+PostgreSQL for expiry, resend invalidation, single use and activation transactions.
+The production service still exposes only /health; handlers are not enabled.
+
+Validation covers cookie signing/tampering/expiry/reuse, key/origin/browser/action
+binding, ordinary/HTMX behavior, escaping, request bounds and security headers.
+The explicit PostgreSQL harness connects hidden-field forms to existing action
+consumption, including scanner GETs and PC/phone concurrent confirmations with
+exactly one winner. Configuration and test commands are in
+[browser foundations](BROWSER.md). On 2026-10-25 with Rust 1.99.1, format/check/Clippy/test passed: ten unit tests,
+three HTTP harness tests and three startup tests, plus all five explicitly invoked
+PostgreSQL 17 suites (accounts, verification, mail, lifecycle, browser verification)
+and startup/HTTP health smoke. Mail suites used Mailpit v1.27.0. Documentation links
+and git diff --check passed.
+The existing lifecycle race assertion permits SKIP LOCKED deferral and requires
+successful deletion once competing operations end.
+
+The hosted registration/verification checklist stays unchecked. Remaining PRs:
+shared durable throttling; registration/resend handlers; confirmation activation
+handlers and a complete local HTTPS/browser/Mailpit fixture. No real-browser, TLS,
+hosted-route or SSO readiness is claimed by the Axum/PostgreSQL harness.
 
 ## Milestone decisions
 
