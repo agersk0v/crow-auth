@@ -13,7 +13,8 @@ Developers integrate **Sign in with Crow** through OpenID Connect.
 Each app manages its own data, permissions and local sessions.
 Keep the product small enough for one maintainer to operate.
 
-These are product goals. Authentication and app management are not implemented yet.
+These are product goals. Account storage and password-security foundations exist,
+but registration, verification, authentication and app management are not available.
 
 The [first milestone specification](docs/PRODUCT.md) defines the accepted planned
 account lifecycle, shared sign-in and app management behavior. The
