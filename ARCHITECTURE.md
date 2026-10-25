@@ -18,7 +18,11 @@ Signed pre-auth/CSRF protection and escaped hidden-token templates are available
 as library components; [browser foundations](docs/BROWSER.md) describes their use.
 One PostgreSQL counter table supplies shared rolling registration/resend budgets
 before expensive work; [throttling](docs/THROTTLING.md) documents its behavior.
-No account HTTP handlers are implemented yet.
+`src/hosted.rs` connects these components to registration/resend handlers. Startup
+loads browser/mail settings and one shared password service; actual socket peer IPs
+reach the limiter through Axum ConnectInfo. Pending account/action/outbox creation
+and expired matching reservation release share one transaction. No new table or
+dependency was added. Browser confirmation and authenticated sessions remain pending.
 
 Hosted account pages, app management and OpenID Connect are planned to live in
 the same service. Add structure as features need it; keep the design simple.

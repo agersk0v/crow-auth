@@ -1,0 +1,17 @@
+{# Renders escaped registration fields without ever echoing the password. #}
+{% extends "layout.html" %}
+{% block title %}Create your Crow account{% endblock %}
+{% block content %}
+<h1>Create your Crow account</h1>
+{% if !error.is_empty() %}<p role="alert">{{ error }}</p>{% endif %}
+<form method="post" action="/api/hosted/register">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <p><label>Username <input name="username" autocomplete="username" minlength="3" maxlength="32" value="{{ username }}" required></label></p>
+  <p><label>Email <input type="email" name="email" autocomplete="email" value="{{ email }}" required></label></p>
+  <p>Email matching ignores ASCII case. Provider-specific aliases and dots are preserved.</p>
+  <p><label>Password <input type="password" name="password" autocomplete="new-password" required></label></p>
+  <p>Use 15–128 characters. Spaces and Unicode are allowed. Common or compromised passwords are rejected.</p>
+  <button type="submit">Create account</button>
+</form>
+<p><a href="/verify-email">Resend verification email</a></p>
+{% endblock %}

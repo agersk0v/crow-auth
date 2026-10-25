@@ -318,7 +318,8 @@ encrypted verification-mail outbox can commit together. It inserts only
 pending records. The caller must confirm commit before reporting browser success;
 uncertain commits are failures and never justify returning credentials. Email
 conflicts are internal storage outcomes, not an HTTP disclosure policy. Expired
-reservations remain reserved until `cleanup_expired_one` commits their removal; no cleanup is falsely advertised by the timestamp alone.
+reservations remain reserved until cleanup or registration commits their removal;
+no cleanup is falsely advertised by the timestamp alone.
 
 Later login, verification, replacement and deletion must acquire the account row
 `FOR UPDATE` first, then follow the authoritative lock order above, reread account
@@ -340,7 +341,8 @@ with the blocking task until it finishes. Future handlers map overload to 503;
 distributed throttling and same-cost unknown-user verification remain login work.
 The dataset version, checksum and monthly update instructions are in
 [data/README.md](../data/README.md); loading occurs at service initialization.
-The health-only HTTP server does not construct a password service yet.
+The HTTP server now constructs one password service at startup and shares it
+across registration handlers; missing or invalid blocklist data prevents startup.
 
 ## Verification-action primitives
 
@@ -461,8 +463,8 @@ single-use/expiry/resend/account-state enforcement. No extra form-context lifeti
 is introduced, and verification remains possible from another browser/device.
 
 [Browser integration](BROWSER.md) documents configuration, signing-key operation,
-hidden fields and remaining handler responsibilities. The production service still
-has only /health. Shared throttling is implemented below; hosted routes, original-flow continuation,
+hidden fields and remaining handler responsibilities. Registration/resend now use
+these protections. Confirmation activation, original-flow continuation,
 authenticated sessions and real HTTPS/browser evidence remain pending.
 
 ## Shared registration throttling implementation
@@ -491,5 +493,40 @@ retain no unnecessary expired state. No new dependency, key or service was added
 
 [Throttling operation](THROTTLING.md) defines counter columns, counting/order,
 permissions, retry semantics and tests. The migration and independent-pool race
-suite are wired into CI. Actual hosted handlers and deployment capacity checks
-remain unimplemented.
+suite are wired into CI. Hosted registration/resend now use this limiter.
+Deployment capacity checks remain outstanding.
+
+## Hosted registration and resend implementation
+
+`HostedRegistration` shares browser security, password workers, mail configuration
+and the PostgreSQL limiter. Startup validates all settings before listening.
+Forms are escaped, script-free, ordinary POSTs; HTMX gets the same protections.
+CSRF/Origin checks precede the durable budget, which precedes password hashing
+and account transactions. Form errors never redisplay passwords or raw extractor
+errors. Socket peer addresses come from ConnectInfo, never forwarding headers.
+Unsupported app-flow inputs fail locally until authorization continuation exists.
+
+Registration hashes original password bytes outside locks, then locks any matching
+expired reservations in UUID order and releases them using the existing account-
+first cleanup logic. Deletion, pending account, action and encrypted outbox share
+one transaction. Mail/commit failure returns 503 and no successful mutation claim.
+`create_pending` uses non-aborting ON CONFLICT DO NOTHING, then classifies identity
+conflicts in a fresh read: email wins if both collide, keeping concurrent exact
+submissions generic. Email conflicts roll back and redirect to conditional generic
+instructions; username-only conflicts produce safe 400 field errors. Existing
+passwords, identities and reservation deadlines are never overwritten.
+
+Resend looks up the canonical email and calls the existing account-locking replacement
+operation. A successful replacement commits before generic 303; missing accounts
+commit a read-only transaction, while active/expired refusals confirm rollback
+before the same response. Queue failure rolls back the old link/job replacement.
+Handlers use transaction-local two-second lock and three-second statement limits.
+The separate SMTP worker performs delivery; the HTTP process never sends inline.
+No new table, dependency, authenticated cookie or worker was added.
+
+The real token GET deliberately returns generic 503 until the protected activation
+handler lands. Its action remains untouched and unreflected. The hosted database
+suite covers ordinary/HTMX forms, canonical collisions, original password bytes,
+expiry reclamation, captured mail, resend preservation, concurrent duplicates,
+CSRF/Origin/throttle errors, queue failure rollback and safe startup errors.
+This is Axum/PostgreSQL/Mailpit evidence, not a real HTTPS browser result.

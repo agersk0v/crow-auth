@@ -16,6 +16,37 @@ struct ConfirmationTemplate<'a> {
     token: &'a str,
 }
 
+#[derive(Template)]
+#[template(path = "register.html")]
+struct RegistrationTemplate<'a> {
+    csrf: &'a str,
+    username: &'a str,
+    email: &'a str,
+    error: &'a str,
+}
+#[derive(Template)]
+#[template(path = "resend.html")]
+struct ResendTemplate<'a> {
+    csrf: &'a str,
+    email: &'a str,
+    error: &'a str,
+}
+
+pub fn registration_page(csrf: &str, username: &str, email: &str, error: &str) -> Response {
+    render(
+        RegistrationTemplate {
+            csrf,
+            username,
+            email,
+            error,
+        }
+        .render(),
+    )
+}
+pub fn resend_page(csrf: &str, email: &str, error: &str) -> Response {
+    render(ResendTemplate { csrf, email, error }.render())
+}
+
 pub fn message_page(title: &str, message: &str) -> Response {
     render(MessageTemplate { title, message }.render())
 }

@@ -2,6 +2,7 @@
 
 pub mod accounts;
 pub mod browser;
+pub mod hosted;
 pub mod mail;
 pub mod password;
 pub mod policy;

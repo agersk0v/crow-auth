@@ -3,6 +3,16 @@
 set -euo pipefail
 
 : "${DATABASE_URL:?Set DATABASE_URL to a disposable PostgreSQL database}"
+# Disposable smoke configuration only; never use these public fixture keys in deployment.
+export CROW_ORIGIN=https://crow.localhost:3000
+export BROWSER_SIGNING_KEY=BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc
+export MAIL_ENCRYPTION_KEY=CAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAg
+export MAIL_FROM=crow@example.test
+export SMTP_HOST=127.0.0.1
+export SMTP_PORT=1025
+export MAIL_LOCAL_CAPTURE=true
+unset SMTP_USERNAME SMTP_PASSWORD
+export PASSWORD_BLOCKLIST_PATH=tests/fixtures/compromised-passwords.txt
 cargo build --locked
 
 smoke_dir=$(mktemp -d)
@@ -32,7 +42,12 @@ for ((attempt = 0; attempt < 30; attempt++)); do
     fi
     # Reject a response from another process if our service failed to bind.
     kill -0 "$service_pid"
-    echo 'PostgreSQL startup and HTTP health smoke test passed.'
+    curl --fail --silent --max-time 2 http://127.0.0.1:3000/register >"$smoke_dir/register"
+    grep -q 'name="csrf"' "$smoke_dir/register"
+    grep -q 'action="/api/hosted/register"' "$smoke_dir/register"
+    curl --fail --silent --max-time 2 http://127.0.0.1:3000/verify-email >"$smoke_dir/resend"
+    grep -q 'action="/api/hosted/resend-verification"' "$smoke_dir/resend"
+    echo 'PostgreSQL startup, HTTP health and hosted-form smoke checks passed.'
     exit 0
   fi
   sleep 1

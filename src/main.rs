@@ -29,10 +29,15 @@ async fn main() -> std::io::Result<()> {
         .await
         .map_err(|_| io::Error::other("PostgreSQL migration failed"))?;
 
+    let hosted = crow_auth::hosted::HostedRegistration::from_env(db)?;
     let app = Router::new()
         .route("/health", get(|| async { "ok" }))
-        .with_state(db);
+        .merge(hosted.router());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:3000").await?;
 
-    axum::serve(listener, app).await
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .await
 }

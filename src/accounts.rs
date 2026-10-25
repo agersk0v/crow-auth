@@ -28,7 +28,7 @@ impl std::error::Error for AccountError {}
 
 /// Insert only pending accounts. Caller owns the transaction so the encrypted mail
 /// outbox insert can commit atomically. Return no browser success before commit.
-/// EmailReserved is internal: a future HTTP handler must give a generic response.
+/// EmailReserved is internal: HTTP handlers must give a generic response.
 pub async fn create_pending(
     tx: &mut Transaction<'_, Postgres>,
     username: &Username,
@@ -36,15 +36,26 @@ pub async fn create_pending(
     hash: &PasswordDigest,
 ) -> Result<Uuid, AccountError> {
     let id = Uuid::new_v4();
-    sqlx::query("INSERT INTO accounts(id,username,email,password_hash,created_at,pending_expires_at) SELECT $1,$2,$3,$4,now,now+interval '24 hours' FROM (SELECT clock_timestamp() AS now) clock")
-        .bind(id).bind(username.as_str()).bind(email.as_str()).bind(hash.as_phc()).execute(&mut **tx).await.map_err(|error| {
-            match error.as_database_error().and_then(|e| e.constraint()) {
-                Some("accounts_username_key") => AccountError::UsernameTaken,
-                Some("accounts_email_key") => AccountError::EmailReserved,
-                _ => AccountError::Unavailable,
-            }
-        })?;
-    Ok(id)
+    let inserted: Option<Uuid> = sqlx::query_scalar("INSERT INTO accounts(id,username,email,password_hash,created_at,pending_expires_at) SELECT $1,$2,$3,$4,now,now+interval '24 hours' FROM (SELECT clock_timestamp() AS now) clock ON CONFLICT DO NOTHING RETURNING id")
+        .bind(id).bind(username.as_str()).bind(email.as_str()).bind(hash.as_phc())
+        .fetch_optional(&mut **tx).await.map_err(|_| AccountError::Unavailable)?;
+    if let Some(id) = inserted {
+        return Ok(id);
+    }
+    // Classify committed conflicts after the insert's uniqueness wait. Email wins
+    // if both identifiers conflict, preserving the generic email response even
+    // for concurrent exact duplicate submissions. No existing row is modified.
+    let (email_reserved, username_taken): (bool, bool) = sqlx::query_as(
+        "SELECT EXISTS(SELECT 1 FROM accounts WHERE email=$1),EXISTS(SELECT 1 FROM accounts WHERE username=$2)",
+    ).bind(email.as_str()).bind(username.as_str()).fetch_one(&mut **tx).await
+        .map_err(|_| AccountError::Unavailable)?;
+    Err(if email_reserved {
+        AccountError::EmailReserved
+    } else if username_taken {
+        AccountError::UsernameTaken
+    } else {
+        AccountError::Unavailable
+    })
 }
 
 /// Remove at most one expired pending reservation in an owned transaction.
@@ -75,11 +86,41 @@ async fn cleanup_in_transaction(tx: &mut Transaction<'_, Postgres>) -> Result<bo
     let Some(id) = account else {
         return Ok(false);
     };
+    delete_expired(tx, id).await
+}
+
+/// Reclaim only matching expired reservations before registration inserts. Lock
+/// matching accounts in UUID order, then their actions. The caller owns rollback
+/// and commit, including the replacement account/action/outbox writes.
+pub async fn release_expired_reservations(
+    tx: &mut Transaction<'_, Postgres>,
+    username: &Username,
+    email: &Email,
+) -> Result<u64, AccountError> {
+    let ids: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT id FROM accounts WHERE username=$1 OR email=$2 ORDER BY id FOR UPDATE",
+    )
+    .bind(username.as_str())
+    .bind(email.as_str())
+    .fetch_all(&mut **tx)
+    .await
+    .map_err(|_| AccountError::Unavailable)?;
+    let mut removed = 0;
+    for id in ids {
+        removed += u64::from(
+            delete_expired(tx, id)
+                .await
+                .map_err(|_| AccountError::Unavailable)?,
+        );
+    }
+    Ok(removed)
+}
+
+async fn delete_expired(tx: &mut Transaction<'_, Postgres>, id: Uuid) -> Result<bool, sqlx::Error> {
     sqlx::query("SELECT id FROM verification_actions WHERE account_id=$1 ORDER BY id FOR UPDATE")
         .bind(id)
         .fetch_all(&mut **tx)
         .await?;
-    // Recheck authoritative status/deadline after locks; never trust a stale scan.
     let removed = sqlx::query(
         "DELETE FROM accounts WHERE id=$1 AND status='pending' AND pending_expires_at<=clock_timestamp()",
     ).bind(id).execute(&mut **tx).await?.rows_affected();
