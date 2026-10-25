@@ -215,8 +215,8 @@ Missing, expired or revoked state grants no tokens. Product owns logout effects.
 Use generic login failures, temporary normalized-account/IP throttling and
 separate registration/exchange/refresh limits. Shared deployments need shared
 budgets. Initial shared PostgreSQL-backed limits: login 10 attempts per normalized username
-and 100 per source IP per 15 minutes; registration/reset/resend 5 per email and
-20 per IP per hour; token exchange 120 per client and 300 per IP per minute.
+and 100 per source IP per 15 minutes; registration/reset/resend share 5 per
+canonical email and 20 per transport IP in a rolling hour; token exchange 120 per client and 300 per IP per minute.
 Excess returns 429 with Retry-After; never permanently lock an account. Hash even
 unknown-user login attempts using a dummy hash. Limiter failure returns 503.
 Trust no forwarding headers initially; deployments behind a proxy must configure
@@ -462,5 +462,34 @@ is introduced, and verification remains possible from another browser/device.
 
 [Browser integration](BROWSER.md) documents configuration, signing-key operation,
 hidden fields and remaining handler responsibilities. The production service still
-has only /health. Shared throttling, hosted routes, original-flow continuation,
+has only /health. Shared throttling is implemented below; hosted routes, original-flow continuation,
 authenticated sessions and real HTTPS/browser evidence remain pending.
+
+## Shared registration throttling implementation
+
+RegistrationThrottle uses one PostgreSQL table with domain-separated subject
+digests and bounded timestamp arrays: 20 per IP, 5 per canonical email. Registration
+and resend share the same namespace; future recovery will reuse it. It acquires
+IP then email row locks, prunes using fresh database time after waits and owns its
+commit before any password hashing/account transaction. Subsequent validation or
+account rollback cannot refund a previously admitted attempt. Every IP-admitted
+request counts toward IP, including email-denied requests; a full IP budget cannot
+allocate email state. Denials do not slide/extend their subject's rolling window.
+
+The peer comes from the transport SocketAddr; ports and mapped IPv4/IPv6 forms
+cannot split one IP's budget. Forwarding headers are never accepted by the limiter.
+Caller Origin/CSRF checks precede admission. Missing/invalid email can charge IP
+only. No account lookup is needed and no raw identifier appears in responses.
+
+A five-second total deadline and transaction-local two-second lock/three-second
+statement limits fail closed. Only confirmed commit permits subsequent work.
+Denials return generic 429/Retry-After; DB, lock and uncertain-commit failures return
+503. Cleanup removes at most 100 idle expired buckets per poll through the existing
+account-cleanup process; admission/expiry does not depend on erasure. Digests are
+pseudonymous, not protection against offline guessing. Restrict table access and
+retain no unnecessary expired state. No new dependency, key or service was added.
+
+[Throttling operation](THROTTLING.md) defines counter columns, counting/order,
+permissions, retry semantics and tests. The migration and independent-pool race
+suite are wired into CI. Actual hosted handlers and deployment capacity checks
+remain unimplemented.

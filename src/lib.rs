@@ -5,6 +5,7 @@ pub mod browser;
 pub mod mail;
 pub mod password;
 pub mod policy;
+pub mod throttle;
 pub mod verification;
 
 pub async fn migrate(pool: &sqlx::PgPool) -> Result<(), sqlx::migrate::MigrateError> {

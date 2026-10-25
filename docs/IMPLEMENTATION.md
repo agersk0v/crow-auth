@@ -11,7 +11,8 @@ replacement verification actions, atomic activation, encrypted transactional mai
 a separate SMTP worker, and expired pending-account cleanup. No registration or
 verification HTTP routes, browser sessions, OAuth endpoints or example apps exist.
 **In progress: hosted registration and verification.** Internal browser-security
-foundations are available; shared throttling and hosted handlers are next. The verified-account/two-app milestone remains pending.
+foundations and shared registration/resend throttling are available; hosted
+registration/resend handlers are next. The verified-account/two-app milestone remains pending.
 
 Foundation verification (2026-10-25): all required Rust checks passed; five unit
 tests cover input rules, Unicode/password-byte preservation, salts/costs,
@@ -136,9 +137,35 @@ The existing lifecycle race assertion permits SKIP LOCKED deferral and requires
 successful deletion once competing operations end.
 
 The hosted registration/verification checklist stays unchecked. Remaining PRs:
-shared durable throttling; registration/resend handlers; confirmation activation
+registration/resend handlers using the shared throttle; confirmation activation
 handlers and a complete local HTTPS/browser/Mailpit fixture. No real-browser, TLS,
 hosted-route or SSO readiness is claimed by the Axum/PostgreSQL harness.
+
+## Shared registration/resend throttling (second PR for issue #21)
+
+Implemented: one PostgreSQL counter table with bounded rolling-hour timestamp
+arrays for 5 per canonical email and 20 per transport IP, shared across instances
+and registration/resend calls. Admission commits before expensive work; later
+failures do not refund it. IP-admitted/email-denied requests still charge IP;
+full IP buckets never allocate email state. Errors/timeouts fail closed with 503,
+denials return generic 429/Retry-After, and idle cleanup runs in account-cleanup.
+No extra dependency, configuration key or worker process was required.
+
+The explicit throttle suite verifies independent pools, concurrent budget edges,
+canonical email/mapped-IP handling, rolling expiry and post-lock-wait clocks,
+rollback, lock-timeout failures, cleanup races, and ordinary/HTMX HTTP responses
+with forged forwarding headers. Reproduce with disposable PostgreSQL:
+`cargo test --locked --test throttle_database -- --ignored`.
+[Throttling operation](THROTTLING.md) records integration order and permissions.
+Validation (2026-10-25, Rust 1.99.1): format/check/Clippy/test passed, including ten
+unit tests, three HTTP harness tests and three startup tests. All six explicitly
+invoked PostgreSQL 17 suites and startup/HTTP health smoke passed; mail/lifecycle
+regressions used Mailpit v1.27.0. Documentation links and git diff --check passed.
+
+The parent hosted-registration checklist remains unchecked. Next implement
+registration/resend handlers, then protected verification activation and the full
+HTTPS/browser/mail fixture. No actual form endpoint or production load evidence
+is claimed by these library tests.
 
 ## Milestone decisions
 

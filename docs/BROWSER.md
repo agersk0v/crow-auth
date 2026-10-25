@@ -2,8 +2,8 @@
 
 This is the first increment of issue #21. It supplies signed pre-auth cookies,
 action-bound CSRF checks, escaped Askama templates and an Axum protection layer.
-The production service still exposes only `/health`. Shared throttling,
-registration/resend handlers and the complete HTTPS/browser/mail flow remain later
+The production service still exposes only `/health`. Shared throttling is now
+available as a separate library component; registration/resend handlers and the complete HTTPS/browser/mail flow remain later
 PRs. No authenticated browser session or login is implemented.
 
 ## Configuration and signed cookies
@@ -103,6 +103,10 @@ verifies scanner/PC/phone GETs leave actions untouched, hidden-field submissions
 use the existing verification action, and concurrent valid confirmations have one
 winner. No browser-state tables are created. This is not real-browser/TLS evidence.
 
-This open PR introduces no schema changes. If its earlier unmerged migration 0004
-was applied to a disposable test database, recreate that fixture before testing
-this revision. The merged migrations 0001–0003 are unchanged.
+PR #22 added no browser-state schema. Its earlier unmerged migration 0004 was
+removed; disposable fixtures that applied that old revision must be recreated
+before current migrations. The shared throttle now has its own migration 0004.
+
+Upcoming registration/resend handlers must call the [shared throttle](THROTTLING.md)
+after CSRF/Origin authorization and before password hashing or account transactions.
+It uses transport IP and canonical email, independently of signed-cookie state.

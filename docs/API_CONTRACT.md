@@ -299,6 +299,15 @@ Validation failures return HTML 400 with safe field errors, invalid action token
 400 with restart guidance, unauthenticated portal access 303 /login, stale sensitive
 reauthentication 403 with reauthentication link, CSRF/Origin failure 403, throttling
 429 and dependency failure 503. Never return successful redirect before commit.
+Registration/resend share a rolling-hour budget of 5 per canonical email and 20
+per transport peer IP; recovery will reuse it when implemented. Check CSRF/Origin
+before admission, and admit before password hashing/account transactions. Email-
+denied requests still consume an available IP attempt; a full IP bucket denies
+before touching email state. 429 carries Retry-After seconds; storage/timeout or
+uncertain commit returns 503, never permission to proceed. The shared limiter is
+implemented as a library; these hosted endpoints remain future work. See
+[throttling semantics](THROTTLING.md).
+
 Register/reset/change enforce identical password rules. Validation errors never echo passwords or tokens; confirmation forms may carry
 the emailed token only in the escaped hidden field described above. Unknown/deleted recovery emails produce the same status, page and
 asynchronous timing path as active emails. Failed delivery does not undo a committed
