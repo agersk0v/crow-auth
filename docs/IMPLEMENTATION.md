@@ -5,14 +5,14 @@
 Account/password foundations from issue #13 are implemented: versioned migrations,
 canonical account identifiers and unique reservations, pending/active schema state,
 security versions, Argon2id with bounded workers/queue, and local blocklist
-provisioning. Startup still exposes only GET /health; it now applies migrations.
+provisioning. Startup applies migrations and serves health plus registration/resend forms.
 Account/password and verification/mail foundations are implemented: initial and
 replacement verification actions, atomic activation, encrypted transactional mail,
-a separate SMTP worker, and expired pending-account cleanup. No registration or
-verification HTTP routes, browser sessions, OAuth endpoints or example apps exist.
-**In progress: hosted registration and verification.** Internal browser-security
-foundations and shared registration/resend throttling are available; hosted
-registration/resend handlers are next. The verified-account/two-app milestone remains pending.
+a separate SMTP worker, and expired pending-account cleanup. Hosted registration
+and resend now queue mail using shared browser security and throttling. Browser
+confirmation, sessions, OAuth endpoints and example apps do not exist yet.
+**In progress: hosted registration and verification.** Protected confirmation and
+the HTTPS/browser/mail fixture are next. The verified-account/two-app milestone remains pending.
 
 Foundation verification (2026-10-25): all required Rust checks passed; five unit
 tests cover input rules, Unicode/password-byte preservation, salts/costs,
@@ -121,7 +121,8 @@ The form carries the emailed token and a separate CSRF token in hidden fields.
 No pre-auth or verification-context tables, cleanup, five-minute context deadline
 or pre-render clean redirect are required. The original emailed action remains in
 PostgreSQL for expiry, resend invalidation, single use and activation transactions.
-The production service still exposes only /health; handlers are not enabled.
+At this first increment the service exposed only /health; registration/resend
+handlers are now implemented in the third increment below.
 
 Validation covers cookie signing/tampering/expiry/reuse, key/origin/browser/action
 binding, ordinary/HTMX behavior, escaping, request bounds and security headers.
@@ -137,8 +138,8 @@ The existing lifecycle race assertion permits SKIP LOCKED deferral and requires
 successful deletion once competing operations end.
 
 The hosted registration/verification checklist stays unchecked. Remaining PRs:
-registration/resend handlers using the shared throttle; confirmation activation
-handlers and a complete local HTTPS/browser/Mailpit fixture. No real-browser, TLS,
+registration/resend handlers using the shared throttle (now implemented below);
+confirmation activation handlers and a complete local HTTPS/browser/Mailpit fixture. No real-browser, TLS,
 hosted-route or SSO readiness is claimed by the Axum/PostgreSQL harness.
 
 ## Shared registration/resend throttling (second PR for issue #21)
@@ -162,10 +163,41 @@ unit tests, three HTTP harness tests and three startup tests. All six explicitly
 invoked PostgreSQL 17 suites and startup/HTTP health smoke passed; mail/lifecycle
 regressions used Mailpit v1.27.0. Documentation links and git diff --check passed.
 
-The parent hosted-registration checklist remains unchecked. Next implement
-registration/resend handlers, then protected verification activation and the full
-HTTPS/browser/mail fixture. No actual form endpoint or production load evidence
-is claimed by these library tests.
+At this second increment the parent checklist remained unchecked and form
+handlers were still pending. The third increment below adds them; protected
+activation and the HTTPS/browser/mail fixture remain outstanding. These library
+tests alone claim no actual form endpoint or production load evidence.
+
+## Hosted registration and resend (third PR for issue #21)
+
+Implemented: escaped GET /register and registration POST, generic verification
+instructions/resend GET and protected resend POST. One password service loads the
+provisioned blocklist at startup. CSRF/Origin checks precede shared durable budgets;
+original password bytes are hashed before account locks. Expired matching pending
+reservations, the new account, action and encrypted mail job commit together.
+Email collisions (including concurrent identical submissions) are generic no-ops;
+username-only collisions are safe field errors. Resend preserves passwords and the
+original deadline and leaves active/unknown/expired accounts unchanged. No session,
+new schema, dependency or worker is introduced. The separate SMTP worker delivers
+mail; token-bearing GETs safely return 503 until the final activation increment.
+
+Startup now requires valid browser/mail settings and the real blocklist even for
+health. See the README and [browser](BROWSER.md)/[mail](MAIL.md) operation guides.
+The new explicit hosted_database suite uses PostgreSQL 17 and Mailpit v1.27.0:
+`cargo test --locked --test hosted_database -- --ignored`. It exercises normal and
+HTMX submissions, cookie/CSRF/Origin/body protections, canonical conflicts,
+concurrent exact duplicates, unchanged password bytes, captured mail, expired
+reservation reuse, resend preservation, limiter denial, queue-failure rollback
+and redacted startup failures. The startup smoke check also renders both real forms.
+This harness does not claim real-browser TLS or completed activation evidence.
+
+Validation (2026-10-25, Rust 1.99.1): format/check/Clippy/test passed with ten unit,
+three HTTP and three startup tests, plus all seven explicitly invoked PostgreSQL
+17 suites. Mail suites used Mailpit v1.27.0. The real-service startup/health/form
+smoke check, local documentation links and git diff --check passed.
+
+The parent checklist remains unchecked. Next: protected verification POST and
+confirmation rendering, then complete local HTTPS/browser/Mailpit evidence.
 
 ## Milestone decisions
 

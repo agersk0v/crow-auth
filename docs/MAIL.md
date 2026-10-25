@@ -2,14 +2,16 @@
 
 The internal `mail::queue_initial` operation creates the verification action and
 encrypted delivery job in the caller's pending-account transaction. Roll back on
-any error and report success only after confirmed commit. There are no registration,
-resend or browser-verification routes yet. Captured links target the specified
-future `/verify-email?token=...` confirmation page, which is not implemented.
+any error and report success only after confirmed commit. Hosted registration
+and resend now queue these jobs. Links target `/verify-email?token=...`; browser
+activation is the next increment, so token-bearing GETs currently return a generic
+503 without consuming the action. Registration is not yet a usable sign-in flow.
 
 ## Configuration
 
-The HTTP service still applies migrations at startup and exposes only `/health`.
-Run it once before the separate worker. The worker checks the outbox schema but
+The HTTP service applies migrations at startup and serves health plus registration
+and resend forms. It requires browser signing, the password blocklist and mail
+configuration too; see the README. Run it once before the separate worker. The worker checks the outbox schema but
 does not apply migrations. Cargo does not load `.env`; export worker settings in
 the shell or supply them through your process manager.
 
@@ -27,7 +29,8 @@ Production transport requires STARTTLS with certificate/hostname validation and
 has a ten-second total send deadline, including connection/TLS work. It cannot
 downgrade to plaintext. Local-capture mode permits plaintext only to literal
 loopback hosts (`localhost`, `127.0.0.1`, `::1`) and forbids SMTP credentials. Only
-that mode permits an HTTP Crow origin, also on loopback. Sender and links never
+that mode permits an HTTP Crow origin for internal mail fixtures, also on loopback.
+The hosted HTTP service always requires canonical HTTPS for browser cookies. Sender and links never
 come from request Host or forwarded headers.
 
 Provision the encryption key once through your secret manager and keep it stable
@@ -47,7 +50,10 @@ dedicated worker database identity without schema-creation privileges: it needs
 SELECT and row-lock permissions on accounts/actions and SELECT/UPDATE/DELETE on
 the outbox. It does not need password hashes or account/action creation rights.
 Provision column grants/roles as part of the deployment; migrations do not create
-operator identities. Keep SMTP credentials limited to the worker.
+operator identities. Keep SMTP credentials restricted to the service identities that require them.
+The current shared MailConfig validates SMTP settings at HTTP startup too; if
+authentication is configured, the HTTP process must receive the same paired
+variables. It queues jobs without making SMTP calls.
 
 ## Local capture and worker
 
@@ -74,8 +80,8 @@ cargo run --locked --bin mail-worker
 cargo run --locked --bin mail-worker -- --once
 ```
 
-The library/test suite is currently the only producer. The HTTP service does not
-queue mail. `--once` exits nonzero on configuration/database/decryption failures;
+The HTTP service queues mail but does not start a worker; run the separate worker
+to deliver it. `--once` exits nonzero on configuration/database/decryption failures;
 SMTP failures that were durably scheduled for retry count as successful processing.
 Continuous mode polls once per second and logs only generic outcomes, never
 recipients, tokens, message bodies or SMTP error diagnostics. Ctrl-C finishes the
@@ -156,5 +162,7 @@ Provision a separate cleanup database identity with the required SELECT/row-lock
 and DELETE privileges on accounts/actions/outbox; it does not need mail secrets or
 password hashes. Ctrl-C finishes the current transaction; `--once` exits nonzero
 on storage/configuration failures. Polling can delay reservation release; expiry
-checks still reject verification, resend and mail independently of cleanup. No
-registration behavior is implemented here.
+checks still reject verification, resend and mail independently of cleanup. Hosted
+registration also reclaims matching expired reservations atomically with the new
+account/action/outbox; rollback restores the old reservation. See
+[implementation evidence](IMPLEMENTATION.md).

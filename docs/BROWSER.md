@@ -2,18 +2,18 @@
 
 This is the first increment of issue #21. It supplies signed pre-auth cookies,
 action-bound CSRF checks, escaped Askama templates and an Axum protection layer.
-The production service still exposes only `/health`. Shared throttling is now
-available as a separate library component; registration/resend handlers and the complete HTTPS/browser/mail flow remain later
-PRs. No authenticated browser session or login is implemented.
+Registration/resend now use these components in the HTTP service. Confirmation
+activation and the complete HTTPS/browser/mail flow remain the final PR. No
+authenticated browser session or login is implemented.
 
 ## Configuration and signed cookies
 
 `BrowserSecurity::from_env` requires `CROW_ORIGIN` and `BROWSER_SIGNING_KEY`.
 Alternatively construct it with `BrowserSecurity::new(origin, signing_key)`.
 The origin must be canonical HTTPS, such as `https://crow.localhost:3000`, without
-a trailing slash, credentials, path, query or fragment. The existing HTTP liveness
-listener is not a browser HTTPS fixture. The health-only server does not construct
-BrowserSecurity or require the signing key yet.
+a trailing slash, credentials, path, query or fragment. The HTTP listener on loopback is not a browser HTTPS fixture: terminate trusted
+HTTPS at the exact configured external origin. Startup now requires BrowserSecurity,
+mail configuration and the provisioned password blocklist.
 
 Provision `BROWSER_SIGNING_KEY` as 32 random bytes encoded as unpadded base64url,
 separate from mail encryption and future OIDC signing keys. Use the same key on every instance
@@ -52,7 +52,7 @@ return 403. No Host, forwarding, Referer or HTMX header substitutes for these ch
 
 `BrowserSecurity::protect(router)` adds Origin checks for unsafe methods, 16 KiB
 body limits, no-store/no-referrer, nosniff, framing/CSP protections and Vary:
-HX-Request. It does not automatically validate CSRF: future form handlers must call
+HX-Request. It does not automatically validate CSRF: form handlers must call
 `authorize_post` before account writes. Ordinary and HTMX requests use the same
 checks. The templates need no scripts, third-party assets or raw-HTML bypasses.
 
@@ -85,8 +85,10 @@ browser/action while the signed cookie remains valid. Opening the email on a pho
 creates the phone's form/cookie and permits verification there, without transferring
 a PC's app-flow binding or signing either browser in.
 
-The actual routes, protected activation handler and end-to-end browser fixture are
-not enabled by this increment. Only the test harness connects these primitives.
+The confirmation steps above remain planned. The real `/verify-email` currently
+renders resend instructions only; requests containing `token` return generic 503
+without echo or consumption. Registration/resend routes are enabled. The protected
+activation handler and HTTPS/browser fixture are next.
 
 ## Evidence
 
@@ -107,6 +109,6 @@ PR #22 added no browser-state schema. Its earlier unmerged migration 0004 was
 removed; disposable fixtures that applied that old revision must be recreated
 before current migrations. The shared throttle now has its own migration 0004.
 
-Upcoming registration/resend handlers must call the [shared throttle](THROTTLING.md)
+Registration/resend handlers call the [shared throttle](THROTTLING.md)
 after CSRF/Origin authorization and before password hashing or account transactions.
 It uses transport IP and canonical email, independently of signed-cookie state.

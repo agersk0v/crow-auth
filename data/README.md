@@ -10,11 +10,11 @@ python3 scripts/provision-password-blocklist.py
 The downloaded list is ignored by Git. The provisioner verifies its checksum and
 atomically replaces `data/common-passwords.txt`; failures preserve the old file.
 `PasswordService::load` requires a nonempty UTF-8 list at initialization. No user
-password is ever submitted to the source or another service. Initialize the future
-registration/password-change service with this file; do not substitute the tiny
-unit-test fixture. Loading is a synchronous startup operation, not request work.
-The current HTTP skeleton has no password endpoints and needs no blocklist to
-serve `/health`.
+password is ever submitted to the source or another service. The HTTP service loads this file once at startup, with an optional
+`PASSWORD_BLOCKLIST_PATH` override; do not substitute the tiny unit-test fixture.
+Loading is synchronous startup work, not request work. A missing/invalid list
+prevents the whole HTTP service, including `/health`, from starting. Future
+password-change handlers must share the same policy.
 
 Review upstream monthly: choose a specific revision, review provenance/license,
 compute the expected checksum independently, update the manifest's revision, URL,

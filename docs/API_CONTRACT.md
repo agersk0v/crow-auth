@@ -6,13 +6,13 @@ This document owns milestone endpoint and protocol details, including browser
 and management handlers. **Accepted** means chosen planned behavior; **Deferred**
 is outside this milestone. Neither implies implementation.
 
-The milestone contracts are accepted specifications. Internal account/mail and
-signed pre-auth/CSRF primitives exist, but the browser, OAuth and
-portal endpoints below remain unimplemented. The HTTP service exposes only
-GET /health; see [browser foundations](BROWSER.md) and
-[implementation evidence](IMPLEMENTATION.md) for current status.
-The current server exposes only `GET /health`. See
-[implementation status and evidence](IMPLEMENTATION.md#status-and-readiness).
+The milestone contracts are accepted specifications. Implemented routes are
+`GET /health`, `GET /register`, `POST /api/hosted/register`, `GET /verify-email`
+(instructions/resend only), and `POST /api/hosted/resend-verification`. Token-bearing
+verification GETs return generic 503 pending the final confirmation increment.
+Other browser, OAuth and portal endpoints remain unimplemented. App `flow` inputs
+currently return local 400, with no fallback or unchecked redirect. See
+[browser operation](BROWSER.md) and [implementation evidence](IMPLEMENTATION.md).
 
 Follow OIDC Core, OAuth 2.0 security best practice (RFC 9700), PKCE (RFC 7636),
 discovery, Bearer token usage and RFC 7009 revocation for supported features.
@@ -298,14 +298,16 @@ credentials for pending accounts show verification guidance without a session.
 Validation failures return HTML 400 with safe field errors, invalid action tokens
 400 with restart guidance, unauthenticated portal access 303 /login, stale sensitive
 reauthentication 403 with reauthentication link, CSRF/Origin failure 403, throttling
-429 and dependency failure 503. Never return successful redirect before commit.
+429 and dependency failure 503. Never claim a successful mutation before commit. A duplicate email is a generic
+no-op 303 only after confirmed rollback; unknown/active/expired resend likewise
+claims no mutation. Neither response says an account or email was actually created.
 Registration/resend share a rolling-hour budget of 5 per canonical email and 20
 per transport peer IP; recovery will reuse it when implemented. Check CSRF/Origin
 before admission, and admit before password hashing/account transactions. Email-
 denied requests still consume an available IP attempt; a full IP bucket denies
 before touching email state. 429 carries Retry-After seconds; storage/timeout or
 uncertain commit returns 503, never permission to proceed. The shared limiter is
-implemented as a library; these hosted endpoints remain future work. See
+used by the implemented registration/resend handlers; recovery remains future work. See
 [throttling semantics](THROTTLING.md).
 
 Register/reset/change enforce identical password rules. Validation errors never echo passwords or tokens; confirmation forms may carry

@@ -1,8 +1,8 @@
 # Shared registration and resend throttling
 
 `RegistrationThrottle` is the second increment of issue #21. It supplies admission
-checks for future hosted registration/resend handlers; the production service still
-exposes only `/health`. Both endpoints must use the same operation and namespace.
+checks now used by the hosted registration/resend handlers. Both endpoints use
+the same operation and namespace.
 Recovery will reuse this account-entry budget when that endpoint is implemented.
 Login/exchange policies are separate future work.
 
@@ -35,7 +35,7 @@ Construct `RegistrationThrottle::new(pool.clone())` on each instance. It needs n
 additional environment key, dependency or storage service. Each instance shares
 the same PostgreSQL table, so restarts do not reset active budgets.
 
-Future handlers must:
+The hosted handlers follow this order:
 
 1. Check the signed-cookie CSRF token and Origin using the expected form action.
 2. Parse/canonicalize email; preserve an invalid result long enough to charge IP.
@@ -102,4 +102,5 @@ independent instances, concurrent requests, rollback, post-lock-wait expiry,
 lock-timeout 503, bounded/concurrent cleanup and the real cleanup binary. An Axum
 harness verifies signed-cookie/CSRF ordering, ordinary/HTMX response behavior,
 Retry-After, varied forged forwarding headers and redacted fail-closed responses.
-These tests do not claim production registration routes or load-test readiness.
+The hosted_database suite also exercises these checks through the real hosted
+router. No production capacity or load-test readiness is claimed.

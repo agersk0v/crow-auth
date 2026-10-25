@@ -3,9 +3,11 @@
 A small identity provider for adding **Sign in with Crow** to independent apps
 using OpenID Connect.
 
-The service connects to PostgreSQL, runs versioned migrations and serves a health
-endpoint. Account persistence and password-security primitives are implemented;
-hosted registration, browser email verification and sign-in are not available yet.
+The service runs migrations and serves registration and verification-mail resend
+forms. Registration creates a pending account and encrypted mail job atomically;
+a separate worker sends the email. Browser confirmation and sign-in are not
+available yet: emailed links return a safe temporary-unavailable page until the
+next increment.
 
 ## Run locally
 
@@ -24,12 +26,27 @@ using the development password from `.env` (URL-encode special characters):
 
 ```sh
 export DATABASE_URL='postgres://crow_auth:<url-encoded-password>@127.0.0.1:5432/crow_auth'
+python3 scripts/provision-password-blocklist.py
+# Export the browser/mail settings described below before starting:
 cargo run --locked
 ```
 
 Compose reads `.env`; `cargo run` does not load it. The URL above is a placeholder.
 If you change `POSTGRES_PORT`, use the same port in `DATABASE_URL`.
-The server listens on `127.0.0.1:3000`. `GET /health` returns `ok`:
+Before startup, export `CROW_ORIGIN`, `BROWSER_SIGNING_KEY`, `MAIL_FROM`,
+`MAIL_ENCRYPTION_KEY`, `SMTP_HOST`, `SMTP_PORT` and the appropriate SMTP/local-capture
+settings from [mail operation](docs/MAIL.md). Provision separate random 32-byte
+unpadded-base64url keys for browser signing and mail encryption; never use the
+placeholder values. `PASSWORD_BLOCKLIST_PATH` defaults to `data/common-passwords.txt`.
+Missing/invalid browser, mail or blocklist settings fail startup, including health.
+
+The server listens over HTTP on `127.0.0.1:3000`. To use browser forms, put a trusted
+local HTTPS terminator in front of it and set the exact external `CROW_ORIGIN`, for
+example `https://crow.localhost:3443`. Secure cookies require HTTPS. The service does
+not supply TLS termination yet; the reproducible HTTPS/browser fixture is the next
+increment. Forwarding headers do not override Origin or transport IP; a proxy shares
+its 20/hour IP budget across users until trusted-peer handling is implemented.
+`GET /health` returns `ok`:
 
 ```sh
 curl --fail http://127.0.0.1:3000/health
@@ -57,6 +74,7 @@ export TEST_SMTP_PORT=1025
 export TEST_MAILPIT_URL=http://127.0.0.1:8025
 cargo test --locked --test mail_database -- --ignored
 cargo test --locked --test lifecycle_database -- --ignored
+cargo test --locked --test hosted_database -- --ignored
 docker compose -f compose.test.yaml -p crow-auth-test down
 ```
 
@@ -69,51 +87,48 @@ creates a unique schema and removes it after a successful run; CI always runs th
 Missing `TEST_DATABASE_URL` fails the explicit invocation. To smoke-test the service
 against this database, set `DATABASE_URL` to the test URL for that run.
 
-## Account foundations
+## Registration and account foundations
 
-Startup applies SQLx migrations. The library normalizes usernames/emails, creates
-pending account records inside caller-owned transactions, and hashes/verifies
-passwords with Argon2id. It has no registration or login routes and creates no
-browser sessions. Pending accounts carry a 24-hour deadline; releasing expired
-reservations is handled by the separate `account-cleanup` process. Internal verification primitives issue and consume purpose-bound links and
-activate pending accounts atomically. Initial and resent verification mail can be queued in an encrypted
-transactional outbox and delivered by a separate SMTP worker. Resend invalidates
-all earlier links without changing the password or extending the reservation. There is no browser
-verification route yet; see [mail setup and operation](docs/MAIL.md).
-See [the primitive contract](docs/ARCHITECTURE.md#verification-action-primitives).
+`GET /register` renders an escaped form. Its POST checks signed-cookie CSRF/Origin,
+charges shared throttling, validates input and hashes the unchanged password with
+one shared bounded Argon2id service. Account, verification action and encrypted mail
+job commit together. Expired matching reservations are reclaimed in that transaction.
+Duplicate emails return the same generic 303 instructions without changing the
+existing account; unavailable usernames get a safe field error. No session is created.
 
-Before building registration/password-change handlers, provision the local
-compromised-password list with `python3 scripts/provision-password-blocklist.py`.
-See [dataset provenance and monthly updates](data/README.md). The password service
-cannot initialize with a missing or empty list. The current health-only HTTP server
-does not initialize that service. Never use the tiny test fixture in a deployment.
+`GET /verify-email` displays instructions and the resend form. Resend replaces
+pending verification links without changing the password or 24-hour reservation.
+Unknown, active and expired emails get the same generic response. A separate
+`mail-worker` delivers committed jobs; `account-cleanup` removes expired pending
+accounts and idle throttle buckets. See [mail setup](docs/MAIL.md).
 
-Hashing uses four blocking workers and at most sixteen waiting requests; overload
-is an explicit error for future handlers to map to 503. These are prototype costs,
-not a production benchmark. See [foundation evidence](docs/IMPLEMENTATION.md) and
-[transaction rules](docs/ARCHITECTURE.md#account-foundation-implementation).
+Email-token confirmation and login remain unimplemented. Token-bearing GETs return
+503 without consuming or echoing the token. The parent hosted-registration checklist
+stays unchecked until the protected confirmation handler and HTTPS/browser tests land.
 
-## Hosted browser foundations
+Provision and maintain the real blocklist as described in [dataset operation](data/README.md).
+Never use the tiny test fixture in deployment. Four hashing workers and sixteen
+waiting requests bound load; overload returns 503. These are prototype costs,
+not production benchmarks. See [implementation evidence](docs/IMPLEMENTATION.md).
 
-The library now includes signed pre-auth cookies, action-bound CSRF, strict Origin
-validation, escaped Askama templates and security-header/body-limit middleware.
-Verification forms use hidden email-token and CSRF fields with no browser-state
-or confirmation-context tables. These are tested primitives; they are not yet exposed by
-the health-only HTTP service. See [browser integration and limits](docs/BROWSER.md).
-Shared PostgreSQL throttling is also available for the upcoming handlers: one
-rolling budget shared by registration/resend, 5 per canonical email and 20 per
-source IP per hour, with 429/Retry-After and fail-closed 503 responses.
-See [throttling behavior and integration](docs/THROTTLING.md). Hosted registration
-and verification handlers remain next.
+## Browser protections
+
+Signed pre-auth cookies, action-bound CSRF, strict Origin checks, escaped Askama
+forms and security headers/body limits protect the hosted routes. No browser-state
+or confirmation-context table is needed. See [browser operation](docs/BROWSER.md).
+Registration/resend share rolling PostgreSQL budgets of 5 per canonical email and
+20 per transport IP per hour, with 429/Retry-After and fail-closed 503 responses.
+See [throttling](docs/THROTTLING.md).
 
 ## Continuous integration
 
 GitHub Actions runs formatting, compilation, Clippy, unit tests, account and
 verification-action tests, encrypted-outbox/SMTP-capture and lifecycle race suites,
-signed-cookie CSRF/verification and shared-throttling checks, and a PostgreSQL 17 startup/HTTP health
-smoke test on pull requests to `main`, pushes to `main`, and
+signed-cookie CSRF/verification, shared-throttling and hosted registration/resend
+checks, and a PostgreSQL 17 startup/HTTP health/form smoke test on pull requests to `main`, pushes to `main`, and
 merge-queue groups. The workflow can also be started manually. To reproduce the
-smoke check locally with a disposable database:
+smoke check locally with a disposable database (the script supplies public test
+keys and the tiny fixture blocklist; it tests HTTP rendering, not browser HTTPS):
 
 ```sh
 DATABASE_URL="$TEST_DATABASE_URL" bash .github/scripts/smoke-test.sh

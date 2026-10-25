@@ -3,7 +3,7 @@
 
 mod views;
 
-pub use views::{confirmation_page, message_page};
+pub use views::{confirmation_page, message_page, registration_page, resend_page};
 
 use argon2::password_hash::rand_core::{OsRng, RngCore};
 use axum::{
