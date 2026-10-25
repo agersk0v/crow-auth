@@ -298,7 +298,8 @@ canonical unique ASCII username/email, immutable UUID/username/email, pending or
 active status, verification timestamp, monotonic nonnegative security_version,
 and a pending reservation deadline exactly 24 hours after creation. Database
 constraints complement Rust input types; no provider email alias rules apply.
-Active state requires a verification timestamp. There is no activation endpoint, cleanup job or login permission. Internal
+Active state requires a verification timestamp. There is no activation endpoint or login permission; pending cleanup is a
+separate process described below. Internal
 verification credentials and activation are implemented as described below.
 A future deletion migration must accommodate the specified non-identifying
 tombstone/identity removal; the current identity guard deliberately rejects edits.
@@ -308,8 +309,7 @@ encrypted verification-mail outbox can commit together. It inserts only
 pending records. The caller must confirm commit before reporting browser success;
 uncertain commits are failures and never justify returning credentials. Email
 conflicts are internal storage outcomes, not an HTTP disclosure policy. Expired
-reservations remain reserved until the lifecycle cleanup/registration transaction
-releases them; no cleanup is falsely advertised by the timestamp alone.
+reservations remain reserved until `cleanup_expired_one` commits their removal; no cleanup is falsely advertised by the timestamp alone.
 
 Later login, verification, replacement and deletion must acquire the account row
 `FOR UPDATE` first, then follow the authoritative lock order above, reread account
@@ -359,8 +359,8 @@ increment or session is created. There is no HTTP endpoint. Future browser handl
 must enforce confirmation POST, pre-auth CSRF/Origin and action-context checks;
 mail-scanner GETs must never call consumption.
 
-Encrypted initial mail delivery is implemented as described below. Resend
-invalidation and pending-account cleanup remain unimplemented. PostgreSQL integration tests cover bindings, deadline rejection,
+Encrypted initial/resend delivery and pending-account cleanup are implemented
+as described below. PostgreSQL integration tests cover bindings, deadline rejection,
 concurrent consumption, expiry after lock waits, migration reruns and rollback,
 including a simulated activation failure after consumption.
 
@@ -378,8 +378,8 @@ no advisories. This is not a full dependency audit or production delivery eviden
 
 The separate `mail-worker` checks schema availability without running migrations,
 locks account then action then outbox, and rechecks bindings/deadlines before send.
-Locks remain held during the bounded external operation so activation and future
-resend/cleanup serialize with delivery. Configured sender and link origin are
+Locks remain held during the bounded external operation so activation, resend and
+cleanup serialize with delivery. Configured sender and link origin are
 independent of request headers; plaintext SMTP is allowed only in explicit local
 capture mode on loopback without SMTP credentials. Credentials/key/payloads never
 appear in errors or worker logs. Role/key provisioning remains operator work.
@@ -394,5 +394,33 @@ can duplicate the same link and exceed the committed attempt count. A stable
 Message-ID identifies the action, but is not a deduplication guarantee.
 
 [Mail configuration and operation](MAIL.md) covers worker commands, key handling,
-retry behavior and the isolated local inbox. No hosted form, resend or pending
-reservation cleanup is implemented by this increment.
+retry behavior and the isolated local inbox. Hosted forms and browser protections remain the next increment.
+
+## Resend and pending cleanup implementation
+
+`mail::queue_resend` uses an internal replacement primitive under the account
+lock. It checks pending status and the original reservation deadline after lock
+waits, locks old actions in UUID order, deletes them and their cascading encrypted
+payloads, and inserts the replacement action/outbox inside the caller's transaction.
+Any error requires rollback; the old links and payloads then remain intact.
+Initial issuance still rejects duplicate issuance. Resend cannot replace the
+password, extend the reservation, increment security_version or establish a session.
+The fresh link expires at 30 minutes or account expiry, whichever comes first.
+
+`accounts::cleanup_expired_one` owns a transaction, selects one expired pending
+account with FOR UPDATE SKIP LOCKED, locks its actions and rechecks eligibility
+before deletion. Cascading foreign keys erase all associated verification/mail
+state. Confirmed commit releases canonical reservations; failure rolls back the
+entire deletion. Active accounts are excluded. The separate `account-cleanup`
+process polls without SMTP/key configuration or migration privileges.
+
+All consumers/producers/cleaners obey account-first locking. Delivery may finish
+before a waiting resend; a committed replacement prevents subsequent delivery or
+consumption of the old action. Expiry is enforced by verification/resend/delivery,
+independently of asynchronous cleanup. New registration after reservation release
+receives a new UUID and cannot inherit any earlier verification token.
+
+The disposable PostgreSQL/SMTP suite exercises both resend-versus-consumption
+orders, concurrent resends and cleaners, delivery/resend serialization, post-wait
+expiry rejection, cascade rollback, reservation reuse and active-account survival.
+These are internal primitives, not hosted registration/verification or login.

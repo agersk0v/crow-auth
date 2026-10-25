@@ -62,6 +62,7 @@ docker compose -f compose.test.yaml -p crow-auth-test up -d --wait
 export TEST_SMTP_PORT=1025
 export TEST_MAILPIT_URL=http://127.0.0.1:8025
 cargo test --locked --test mail_database -- --ignored
+cargo test --locked --test lifecycle_database -- --ignored
 ```
 
 Open `http://127.0.0.1:8025` to inspect captured fixture messages. Set the worker
@@ -89,7 +90,7 @@ associated data, preventing ciphertext swapping between jobs. The key is never
 stored in PostgreSQL. Workers lock account, action, then outbox, and recheck status,
 email, security version, token consumption and both deadlines after lock waits.
 Holding these locks through the bounded SMTP attempt serializes delivery with
-activation and the future resend/cleanup operations. Busy accounts are skipped.
+activation, resend and cleanup. Busy accounts are skipped.
 
 After a failed initial attempt, retry after 1 minute, then 5 minutes, then 15
 minutes, each delay measured from its preceding failure. There are at most four
@@ -97,8 +98,7 @@ attempts per committed job history. Never attempt an expired/consumed/invalid
 link. Delete the encrypted job after successful delivery, expiry/invalidation or
 retry exhaustion. Invalid/expired jobs are eligible for erasure even when their
 next retry is in the future; polling is asynchronous. Account deletion cascades
-through action rows and cancels queued payloads. Pending-account cleanup and
-resend invalidation are still the next implementation increment.
+through action rows and cancels queued payloads. Resend and pending-account cleanup are implemented as described below.
 
 SMTP and PostgreSQL cannot commit together. Acceptance followed by a crash or DB
 failure can cause duplicate delivery of the same link; a stable Message-ID helps
@@ -106,3 +106,53 @@ identify it, but does not promise deduplication. Database failure rolls back que
 state, never invents a new token, and can make actual sends exceed the committed
 attempt count. Deadline checks occur before sending; delivery latency can make a
 message arrive after expiry. Token validation remains authoritative.
+
+## Resend and expired pending accounts
+
+`mail::queue_resend(tx, account_id, config)` is the internal resend operation.
+It locks the pending account, rechecks the original 24-hour deadline after any
+lock wait, locks/deletes all earlier verification actions (cascading away their
+unsent encrypted payloads), and creates a fresh action and encrypted job. All of
+this shares the caller's transaction. Roll back on every error, including a new
+outbox write failure, to preserve the original links and queued payloads. Only a
+confirmed commit makes replacement successful. Concurrent resends serialize;
+only the last committed link remains valid. Consumed/active, missing or expired
+accounts cannot receive a resend.
+
+Resend preserves the password, security version, canonical identifiers and original
+pending-account deadline. It does not sign in or extend the 24-hour reservation.
+The new token lasts at most 30 minutes, and always stops working at the account's
+original deadline if that comes first. The email explains this earlier cutoff.
+Already delivered mail cannot be recalled, but its replaced link stops working.
+A delivery already holding the account lock can finish before resend proceeds;
+a replacement committed first prevents the old job from being sent afterward.
+
+There is still no resend HTTP route. Future hosted handlers must look up canonical
+email internally, return generic confirmation for absent/active/expired accounts,
+and enforce shared throttling, pre-auth CSRF and Origin checks. They must never
+replace a password during duplicate registration or expose internal errors as
+account-existence signals.
+
+Run cleanup independently of SMTP and its encryption key, after migrations exist:
+
+```sh
+cargo run --locked --bin account-cleanup
+# Remove at most one expired pending account and exit:
+cargo run --locked --bin account-cleanup -- --once
+```
+
+It needs only `DATABASE_URL`, checks existing schema without DDL, processes at most
+one account per poll and sleeps one second between polls. Multiple cleaners skip
+locked accounts. In an account-first transaction it checks `now >= pending_expires_at`,
+locks dependent actions, rechecks eligibility, then deletes the account; foreign
+keys erase actions and encrypted jobs. Only committed removal releases the unique
+username/email reservations. Active accounts are never eligible, even after their
+former pending deadline. Re-registration gets a new UUID and old tokens cannot
+become valid again. Cleanup errors roll back every deletion and log no identifiers.
+
+Provision a separate cleanup database identity with the required SELECT/row-lock
+and DELETE privileges on accounts/actions/outbox; it does not need mail secrets or
+password hashes. Ctrl-C finishes the current transaction; `--once` exits nonzero
+on storage/configuration failures. Polling can delay reservation release; expiry
+checks still reject verification, resend and mail independently of cleanup. No
+registration behavior is implemented here.

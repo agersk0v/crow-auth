@@ -190,7 +190,7 @@ struct MailPayload {
 
 /// Queue initial verification in the caller's account-creation transaction.
 /// Roll back on EVERY error; only report success after confirmed commit. This
-/// does not implement resend or expose the raw token to the caller/browser.
+/// exposes no raw token to the caller/browser. Use queue_resend for later requests.
 pub async fn queue_initial(
     tx: &mut Transaction<'_, Postgres>,
     account_id: Uuid,
@@ -198,10 +198,37 @@ pub async fn queue_initial(
 ) -> Result<(), MailError> {
     let token = verification::issue(tx, account_id)
         .await
-        .map_err(|e| match e {
-            verification::VerificationError::Invalid => MailError::InvalidAction,
-            verification::VerificationError::Unavailable => MailError::Unavailable,
-        })?;
+        .map_err(action_error)?;
+    enqueue(tx, account_id, token, config).await
+}
+
+/// Internal resend operation, NOT an HTTP handler. Preserve the password and
+/// original reservation deadline. Future handlers must throttle, validate CSRF/
+/// Origin and return generic email responses. Roll back on every error.
+pub async fn queue_resend(
+    tx: &mut Transaction<'_, Postgres>,
+    account_id: Uuid,
+    config: &MailConfig,
+) -> Result<(), MailError> {
+    let token = verification::replace(tx, account_id)
+        .await
+        .map_err(action_error)?;
+    enqueue(tx, account_id, token, config).await
+}
+
+fn action_error(error: verification::VerificationError) -> MailError {
+    match error {
+        verification::VerificationError::Invalid => MailError::InvalidAction,
+        verification::VerificationError::Unavailable => MailError::Unavailable,
+    }
+}
+
+async fn enqueue(
+    tx: &mut Transaction<'_, Postgres>,
+    account_id: Uuid,
+    token: verification::VerificationToken,
+    config: &MailConfig,
+) -> Result<(), MailError> {
     // issue holds the account lock; now lock the action in the same order.
     let row = sqlx::query(
         "SELECT id,email_snapshot FROM verification_actions WHERE account_id=$1 FOR UPDATE",
@@ -219,7 +246,7 @@ pub async fn queue_initial(
     let payload = MailPayload {
         recipient: row.get("email_snapshot"),
         body: format!(
-            "Confirm your email address by opening this link and submitting the confirmation form:\n{link}\n\nThis link expires in 30 minutes. Verifying does not sign you in. If you did not register, ignore this email."
+            "Confirm your email address by opening this link and submitting the confirmation form:\n{link}\n\nThis link expires in 30 minutes, or when your pending account expires, whichever comes first. Verifying does not sign you in. If you did not register, ignore this email."
         ),
     };
     let (nonce, ciphertext) = config.encrypt(action_id, &payload)?;

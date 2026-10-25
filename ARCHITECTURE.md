@@ -10,8 +10,10 @@ The service currently checks database connectivity at startup and exposes
 `GET /health` for basic HTTP liveness. It also applies versioned SQLx migrations.
 Account input rules, pending-account persistence, bounded password hashing and
 internal verification actions/activation live in library modules. An encrypted
-transactional mail outbox and a separate SMTP worker deliver initial verification
-links; [mail operation](docs/MAIL.md) documents configuration and guarantees.
+transactional mail outbox and a separate SMTP worker deliver verification
+links. Resend atomically replaces old links and queued mail. `account-cleanup`
+removes expired pending accounts and releases reservations.
+[Mail operation](docs/MAIL.md) documents configuration and guarantees.
 No account HTTP handlers are implemented yet.
 
 Hosted account pages, app management and OpenID Connect are planned to live in

@@ -6,12 +6,12 @@ Account/password foundations from issue #13 are implemented: versioned migration
 canonical account identifiers and unique reservations, pending/active schema state,
 security versions, Argon2id with bounded workers/queue, and local blocklist
 provisioning. Startup still exposes only GET /health; it now applies migrations.
-Internal initial verification-action issuance and atomic activation are now
-implemented, with an encrypted transactional outbox and separate SMTP worker
-for initial verification mail. No registration/verification HTTP routes, account
-cleanup, browser sessions, OAuth endpoints or example apps exist. The account/password
-foundation increment is complete; the remaining foundations and verified-account/two-app milestone are
-pending.
+Account/password and verification/mail foundations are implemented: initial and
+replacement verification actions, atomic activation, encrypted transactional mail,
+a separate SMTP worker, and expired pending-account cleanup. No registration or
+verification HTTP routes, browser sessions, OAuth endpoints or example apps exist.
+**Next: hosted registration and verification**, including browser protections and
+shared throttling. The verified-account/two-app milestone remains pending.
 
 Foundation verification (2026-10-25): all required Rust checks passed; five unit
 tests cover input rules, Unicode/password-byte preservation, salts/costs,
@@ -43,9 +43,8 @@ milestone. None implies implementation. Follow [AGENTS.md](../AGENTS.md) for che
 Implemented: versioned verification-action storage, 256-bit credentials with hashed
 verifiers and redacted Debug output, initial issuance, and account-first atomic
 consumption/activation without a session. Initial issuance rejects repeat issuance;
-resend requires the remaining invalidation increment. The verification-and-mail
-checklist item remains unchecked until delivery, resend and cleanup are implemented
-and verified together. Hosted registration/verification follows that completed item.
+the resend/cleanup increment below completes invalidation and the remaining
+verification-and-mail foundations. Hosted registration/verification is next.
 
 Verification commands (2026-10-25): `cargo fmt --check`, `cargo check --locked`,
 `cargo clippy --locked --all-targets -- -D warnings`, `cargo test --locked`,
@@ -66,8 +65,8 @@ recipient/link storage, configured sender/origin/key, a separate mandatory-START
 SMTP worker with bounded send/retries, payload erasure, and an isolated Mailpit
 capture inbox. The worker does not apply migrations or expose browser endpoints.
 See [mail operation](MAIL.md) for reproducible configuration and worker commands.
-Resend invalidation and pending-account cleanup are next. The verification-and-mail
-checklist item remains unchecked until these increments are integrated and verified.
+The resend/cleanup increment below completes the remaining internal primitives.
+Hosted registration and verification are still unimplemented.
 
 Validation uses the required Rust checks plus explicitly invoked account,
 verification and mail suites against disposable PostgreSQL 17 and Mailpit v1.27.0.
@@ -83,6 +82,34 @@ PostgreSQL startup/HTTP health smoke test. Reproduce the mail suite with
 `cargo test --locked --test mail_database -- --ignored`. Formatting, compilation,
 Clippy, documentation links and `git diff --check` also passed.
 No production SMTP or browser-flow result is implied.
+
+## Resend and cleanup completion (issue #17)
+
+Implemented: `mail::queue_resend` replaces old action rows and unsent encrypted
+payloads atomically, preserves passwords/security versions and the original 24-hour
+reservation, and refuses active/missing/expired accounts. The separate
+`account-cleanup` process removes only expired pending accounts, cancels dependent
+actions/mail, and releases canonical username/email reservations on confirmed commit.
+All paths serialize under account-first locks; errors roll back replacements and
+deletions. No new migration or dependency was required for this increment.
+
+Verification (2026-10-25, Rust 1.99.1, PostgreSQL 17, Mailpit v1.27.0): required
+format/check/Clippy/test commands passed, including eight unit tests, three startup
+tests, all four explicitly invoked database suites, and startup/HTTP health smoke.
+The lifecycle suite exercises replacement of delivered and unsent links, unchanged
+password/version/deadline, concurrent resends, both resend/consumption orders,
+delivery/resend serialization, post-lock-wait expiry, cleanup rollback/competition,
+reservation reuse, active-account survival, and the standalone cleanup process.
+Run it with the disposable setup and variables in [mail operation](MAIL.md):
+`cargo test --locked --test lifecycle_database -- --ignored`. Existing mail tests
+continue to verify retries, SMTP capture and activation from the captured link.
+Documentation links and `git diff --check` pass.
+
+The verification-and-mail primitives checklist item is complete based on these
+internal integration checks. Hosted forms, pre-auth CSRF/Origin enforcement,
+durable browser throttling and scanner-GET/confirmation-POST behavior are the next
+increment. These checks do not establish a usable registration flow, login, SSO,
+production SMTP delivery, hashing benchmarks or release readiness.
 
 ## Milestone decisions
 
@@ -109,14 +136,14 @@ with its source and recommended resolution before changing behavior.
      identifiers and unique reservations, pending/active schema state, security
      versions, bounded Argon2id and local blocklist provisioning. Evidence is
      recorded above; a schema version column alone does not enforce revocation.
-   - [ ] **Verification and mail primitives (next):** purpose-bound, hashed,
+   - [x] **Verification and mail primitives:** purpose-bound, hashed,
      single-use verification tokens; encrypted transactional mail outbox;
      configured sender/link origin and encryption key; delivery retries, resend
      invalidation and expired pending-account cleanup. Serialize account changes
      and token consumption under the specified lock order. Test expiry, concurrent
      consumption/resend/cleanup, rollback and mail retry against disposable PostgreSQL
      and a local SMTP capture inbox.
-   - [ ] **Hosted registration and verification:** escaped forms, pre-auth CSRF
+   - [ ] **Hosted registration and verification (next):** escaped forms, pre-auth CSRF
      and Origin checks, durable shared throttling and redacted logs; initialize
      the password service with the provisioned blocklist. Commit account, action
      and outbox together; use generic email-conflict responses. Confirm activation
@@ -240,8 +267,8 @@ Owners of behavior are Product, API and Architecture; this matrix defines checks
 
 ## Outstanding limitations and later work
 
-Account/password foundations, internal verification actions and initial encrypted
-mail delivery have implementation evidence recorded above; account lifecycle and OIDC/SSO integration evidence remain outstanding. Example
+Account/password and verification/mail foundations (including resend and pending
+cleanup) have implementation evidence recorded above; account lifecycle and OIDC/SSO integration evidence remain outstanding. Example
 backends/harness and deployment runbooks must still be built. Library
 versions, Argon2 cost above the specified minimum, mail provider, connection/worker
 budgets and infrastructure timeouts need validation on the target deployment; they
