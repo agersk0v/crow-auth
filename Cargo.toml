@@ -9,3 +9,6 @@ sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio",
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "sync", "time"] }
 argon2 = "0.5"
 uuid = { version = "1", features = ["v4"] }
+base64 = "0.22"
+sha2 = "0.10"
+subtle = "2"

@@ -47,8 +47,9 @@ Use the standalone test stack rather than pointing tests at development data:
 ```sh
 docker compose -f compose.test.yaml -p crow-auth-test up -d --wait
 export TEST_DATABASE_URL='postgres://crow_auth_test:<url-encoded-test-password>@127.0.0.1:55432/crow_auth_test'
-# Run the database suite before shutting down:
+# Run both database suites before shutting down:
 cargo test --locked --test accounts_database -- --ignored
+cargo test --locked --test verification_database -- --ignored
 docker compose -f compose.test.yaml -p crow-auth-test down
 ```
 
@@ -67,7 +68,10 @@ Startup applies SQLx migrations. The library normalizes usernames/emails, create
 pending account records inside caller-owned transactions, and hashes/verifies
 passwords with Argon2id. It has no registration or login routes and creates no
 browser sessions. Pending accounts carry a 24-hour deadline; releasing expired
-reservations and activating accounts require the later lifecycle implementation.
+reservations requires the later cleanup implementation. Internal verification-action
+primitives can issue and consume a single initial link and activate a pending
+account atomically. There is no browser verification route or mail delivery yet.
+See [the primitive contract](docs/ARCHITECTURE.md#verification-action-primitives).
 
 Before building registration/password-change handlers, provision the local
 compromised-password list with `python3 scripts/provision-password-blocklist.py`.
@@ -83,7 +87,8 @@ not a production benchmark. See [foundation evidence](docs/IMPLEMENTATION.md) an
 ## Continuous integration
 
 GitHub Actions runs formatting, compilation, Clippy, unit tests, the account
-database suite and a PostgreSQL 17 startup/HTTP health smoke test on pull requests to `main`, pushes to `main`, and
+and verification-action database suites and a PostgreSQL 17 startup/HTTP health
+smoke test on pull requests to `main`, pushes to `main`, and
 merge-queue groups. The workflow can also be started manually. To reproduce the
 smoke check locally with a disposable database:
 
