@@ -23,6 +23,10 @@ async fn main() -> std::io::Result<()> {
         .await
         .map_err(|_| io::Error::other("PostgreSQL startup connectivity check failed"))?;
 
+    crow_auth::migrate(&db)
+        .await
+        .map_err(|_| io::Error::other("PostgreSQL migration failed"))?;
+
     let app = Router::new()
         .route("/health", get(|| async { "ok" }))
         .with_state(db);

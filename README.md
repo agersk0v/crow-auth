@@ -3,8 +3,9 @@
 A small identity provider for adding **Sign in with Crow** to independent apps
 using OpenID Connect.
 
-The current implementation is a Rust HTTP skeleton with PostgreSQL connectivity
-and a health endpoint. Authentication is not implemented yet.
+The service connects to PostgreSQL, runs versioned migrations and serves a health
+endpoint. Account persistence and password-security primitives are implemented;
+registration, email verification and sign-in are not available yet.
 
 ## Run locally
 
@@ -46,7 +47,8 @@ Use the standalone test stack rather than pointing tests at development data:
 ```sh
 docker compose -f compose.test.yaml -p crow-auth-test up -d --wait
 export TEST_DATABASE_URL='postgres://crow_auth_test:<url-encoded-test-password>@127.0.0.1:55432/crow_auth_test'
-# Run database checks against TEST_DATABASE_URL when available.
+# Run the database suite before shutting down:
+cargo test --locked --test accounts_database -- --ignored
 docker compose -f compose.test.yaml -p crow-auth-test down
 ```
 
@@ -54,14 +56,34 @@ The test stack uses a separate port, database, credentials and project, with
 PostgreSQL data held in tmpfs. Stopping its container discards its data. Use
 `TEST_POSTGRES_PASSWORD` from `.env` in the test URL, and match any custom
 `TEST_POSTGRES_PORT`. Run the test Compose file alone, not as an override of the
-development file. The current Rust tests only check startup configuration; no
-application database integration suite is implemented yet. To smoke-test the
-service against this database, set `DATABASE_URL` to the test URL for that run.
+development file. The account persistence, uniqueness-race and rollback suite
+creates a unique schema and removes it after a successful run; CI always runs this suite against disposable PostgreSQL.
+Missing `TEST_DATABASE_URL` fails the explicit invocation. To smoke-test the service
+against this database, set `DATABASE_URL` to the test URL for that run.
+
+## Account foundations
+
+Startup applies SQLx migrations. The library normalizes usernames/emails, creates
+pending account records inside caller-owned transactions, and hashes/verifies
+passwords with Argon2id. It has no registration or login routes and creates no
+browser sessions. Pending accounts carry a 24-hour deadline; releasing expired
+reservations and activating accounts require the later lifecycle implementation.
+
+Before building registration/password-change handlers, provision the local
+compromised-password list with `python3 scripts/provision-password-blocklist.py`.
+See [dataset provenance and monthly updates](data/README.md). The password service
+cannot initialize with a missing or empty list. The current health-only HTTP server
+does not initialize that service. Never use the tiny test fixture in a deployment.
+
+Hashing uses four blocking workers and at most sixteen waiting requests; overload
+is an explicit error for future handlers to map to 503. These are prototype costs,
+not a production benchmark. See [foundation evidence](docs/IMPLEMENTATION.md) and
+[transaction rules](docs/ARCHITECTURE.md#account-foundation-implementation).
 
 ## Continuous integration
 
-GitHub Actions runs formatting, compilation, Clippy, tests and a PostgreSQL 17
-startup/HTTP health smoke test on pull requests to `main`, pushes to `main`, and
+GitHub Actions runs formatting, compilation, Clippy, unit tests, the account
+database suite and a PostgreSQL 17 startup/HTTP health smoke test on pull requests to `main`, pushes to `main`, and
 merge-queue groups. The workflow can also be started manually. To reproduce the
 smoke check locally with a disposable database:
 
@@ -71,7 +93,7 @@ DATABASE_URL="$TEST_DATABASE_URL" bash .github/scripts/smoke-test.sh
 
 In a GitHub ruleset for `main`, require the `Rust checks` status check and pull
 requests before merging. Adding the workflow does not configure that repository
-setting. No application code changes are included with this CI setup.
+setting.
 
 ## Documentation
 

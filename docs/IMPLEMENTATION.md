@@ -2,14 +2,28 @@
 
 ## Status and readiness
 
-Documentation defines **Accepted planned behavior**, not shipped functionality.
-Implementation reviewed at `6fb1518`; reconciled with documentation baseline
-`64e9684` on main, which has the same application code. `src/main.rs` connects a five-connection SQLx
-PostgreSQL pool, runs SELECT 1 and exposes only GET /health on 127.0.0.1:3000.
-`tests/startup.rs` checks missing/invalid database configuration and credential
-redaction. Cargo dependencies are Axum, Tokio and SQLx. No migrations, account
-records, templates, mail, sessions, OAuth endpoints or example apps exist.
-This review inspected source; it does not claim a successful live database smoke test.
+Account/password foundations from issue #13 are implemented: versioned migrations,
+canonical account identifiers and unique reservations, pending/active schema state,
+security versions, Argon2id with bounded workers/queue, and local blocklist
+provisioning. Startup still exposes only GET /health; it now applies migrations.
+No registration/verification, account cleanup, mail, browser sessions, OAuth
+endpoints or example apps exist. This is a partial foundation, not completion of
+checklist item 1 or the verified-account/two-app milestone.
+
+Foundation verification (2026-10-25): all required Rust checks passed; five unit
+tests cover input rules, Unicode/password-byte preservation, salts/costs,
+blocklist failure, saturation/cancellation and async progress. Two startup tests
+check safe configuration errors. The explicitly invoked PostgreSQL 17 suite
+passed migration reruns, canonical constraints, immutable identities/security
+versions, concurrent username/email conflicts, transaction rollback and safe
+storage failures. CI runs it with TEST_DATABASE_URL instead of counting the default
+ignored test as verification. An actual service process passed startup/migration
+and HTTP health smoke checks; invalid database authentication failed safely.
+The pinned dataset provisioner downloaded and checksum-verified the reviewed list.
+OSV queries for argon2 0.5.3, password-hash 0.5.0 and uuid 1.29.0 reported no
+advisories on this date; this is not a full dependency-graph audit or a conformance
+claim. Production hashing benchmarks and full lifecycle/SSO acceptance remain
+outstanding.
 
 The first milestone is the entire verified-account/two-backend-app experience,
 including recovery, deletion and negative cases. It is ready for implementation

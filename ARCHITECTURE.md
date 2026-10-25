@@ -7,7 +7,9 @@ Crow Auth uses one Rust service and PostgreSQL.
 - SQLx connects to PostgreSQL.
 
 The service currently checks database connectivity at startup and exposes
-`GET /health` for basic HTTP liveness.
+`GET /health` for basic HTTP liveness. It also applies versioned SQLx migrations.
+Account input rules, pending-account persistence and bounded password hashing
+live in library modules; no account HTTP handlers are implemented yet.
 
 Hosted account pages, app management and OpenID Connect are planned to live in
 the same service. Add structure as features need it; keep the design simple.

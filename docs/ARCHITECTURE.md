@@ -280,7 +280,8 @@ with an explicit RSA backend/RS256 allowlist for ID-token signing and verificati
 url for parsing registered redirects, and lettre for SMTP. Pin maintained versions
 and audit APIs/advisories at implementation time; a replacement requires updating
 this record. Axum/Tokio/SQLx are already dependencies; the other libraries are not
-installed and no library choice constitutes verified interoperability.
+all installed. Argon2 and UUID support are installed for account foundations;
+no library choice constitutes verified interoperability.
 
 Crow owns OAuth/OIDC server request validation, PKCE S256 calculation, transaction
 bindings, one-use semantics, discovery truthfulness, consent, pairwise mapping,
@@ -289,3 +290,45 @@ a JWT library implements an OIDC provider. Use a maintained standards-based OIDC
 client library in each example backend; its configured checks must cover the
 [API validation contract](API_CONTRACT.md#token-claims-and-validation). Protocol
 conformance and negative tests remain required regardless of library choice.
+
+## Account foundation implementation
+
+Issue #13 implements only account storage and password primitives. Accounts have
+canonical unique ASCII username/email, immutable UUID/username/email, pending or
+active status, verification timestamp, monotonic nonnegative security_version,
+and a pending reservation deadline exactly 24 hours after creation. Database
+constraints complement Rust input types; no provider email alias rules apply.
+Active state requires a verification timestamp. There is no activation endpoint,
+verification credential, cleanup job or login permission in this implementation.
+A future deletion migration must accommodate the specified non-identifying
+tombstone/identity removal; the current identity guard deliberately rejects edits.
+
+`create_pending` takes a caller-owned SQLx transaction so account creation and a
+future encrypted verification-mail outbox can commit together. It inserts only
+pending records. The caller must confirm commit before reporting browser success;
+uncertain commits are failures and never justify returning credentials. Email
+conflicts are internal storage outcomes, not an HTTP disclosure policy. Expired
+reservations remain reserved until the lifecycle cleanup/registration transaction
+releases them; no cleanup is falsely advertised by the timestamp alone.
+
+Later login, verification, replacement and deletion must acquire the account row
+`FOR UPDATE` first, then follow the authoritative lock order above, reread account
+status/security_version, and check deadlines after any lock wait. Version bumps
+and dependent credential invalidation must share the transaction; the current
+schema's version column alone does not implement invalidation. Keep hashing
+outside the account lock, then recheck authoritative credential state under lock
+before authenticating. No future session/flow/token tables are created in advance.
+
+The password service uses the accepted minimum Argon2id v19 parameters and OS-backed
+salt generation from the maintained argon2/password-hash libraries. It supports
+only the explicitly bounded stored PHC costs of this release; extend that reviewed
+allowlist when tuning costs while retaining support for existing hashes. Four
+worker permits and twenty total admission permits bound execution and waiting.
+Construct one password service per server instance and clone it for handlers;
+clones share admission, workers and the loaded blocklist.
+Queued cancellation frees admission; running cancellation leaves both permits
+with the blocking task until it finishes. Future handlers map overload to 503;
+distributed throttling and same-cost unknown-user verification remain login work.
+The dataset version, checksum and monthly update instructions are in
+[data/README.md](../data/README.md); loading occurs at service initialization.
+The health-only HTTP server does not construct a password service yet.
