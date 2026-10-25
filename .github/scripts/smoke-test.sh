@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Checks database-backed service startup and HTTP health, then cleans up the process.
 set -euo pipefail
 
 : "${DATABASE_URL:?Set DATABASE_URL to a disposable PostgreSQL database}"

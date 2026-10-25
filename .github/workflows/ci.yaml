@@ -1,3 +1,5 @@
+# Validates Rust changes and PostgreSQL-backed checks before and after merging.
+
 name: CI
 
 on:

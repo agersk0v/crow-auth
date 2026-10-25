@@ -1,3 +1,5 @@
+//! Verifies startup fails safely for missing or invalid database configuration.
+
 use std::process::Command;
 
 #[test]

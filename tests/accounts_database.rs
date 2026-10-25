@@ -1,3 +1,6 @@
+//! Exercises account migrations, constraints, concurrent conflicts and rollback
+//! against an explicitly configured disposable PostgreSQL database.
+
 use crow_auth::{
     accounts::{AccountError, create_pending},
     password::PasswordService,

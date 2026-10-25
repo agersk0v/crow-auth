@@ -1,3 +1,6 @@
+//! Validates password policy and provides bounded Argon2id hashing/verification
+//! using a locally provisioned compromised-password list.
+
 use argon2::{
     Argon2, Params, PasswordHash, PasswordHasher, PasswordVerifier,
     password_hash::{SaltString, rand_core::OsRng},
