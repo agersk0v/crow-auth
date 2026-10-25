@@ -50,6 +50,7 @@ export TEST_DATABASE_URL='postgres://crow_auth_test:<url-encoded-test-password>@
 # Run the database suites before shutting down:
 cargo test --locked --test accounts_database -- --ignored
 cargo test --locked --test verification_database -- --ignored
+cargo test --locked --test browser_database -- --ignored
 # Mail suite also needs the capture service from this test stack:
 export TEST_SMTP_PORT=1025
 export TEST_MAILPIT_URL=http://127.0.0.1:8025
@@ -91,11 +92,19 @@ is an explicit error for future handlers to map to 503. These are prototype cost
 not a production benchmark. See [foundation evidence](docs/IMPLEMENTATION.md) and
 [transaction rules](docs/ARCHITECTURE.md#account-foundation-implementation).
 
+## Hosted browser foundations
+
+The library now includes pre-auth/CSRF state, strict Origin validation, escaped
+Askama templates, security-header/body-limit middleware and short-lived
+verification contexts. These are tested primitives; they are not yet exposed by
+the health-only HTTP service. See [browser integration and limits](docs/BROWSER.md).
+Shared throttling and hosted registration/verification handlers remain next.
+
 ## Continuous integration
 
 GitHub Actions runs formatting, compilation, Clippy, unit tests, account and
 verification-action tests, encrypted-outbox/SMTP-capture and lifecycle race suites,
-and a PostgreSQL 17 startup/HTTP health
+browser security/confirmation-context checks, and a PostgreSQL 17 startup/HTTP health
 smoke test on pull requests to `main`, pushes to `main`, and
 merge-queue groups. The workflow can also be started manually. To reproduce the
 smoke check locally with a disposable database:
@@ -117,6 +126,7 @@ setting.
 - [OIDC and browser contracts](docs/API_CONTRACT.md): endpoints and validation.
 - [Implementation and acceptance](docs/IMPLEMENTATION.md): build order, readiness and two-app scenario.
 - [Verification mail](docs/MAIL.md): worker configuration, local inbox and delivery guarantees.
+- [Browser foundations](docs/BROWSER.md): pre-auth, CSRF, form contexts and integration boundaries.
 - [Agent guidance](AGENTS.md): working in this repository.
 
 The first milestone requires a verified account to sign into two backend apps

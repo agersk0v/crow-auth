@@ -10,8 +10,8 @@ Account/password and verification/mail foundations are implemented: initial and
 replacement verification actions, atomic activation, encrypted transactional mail,
 a separate SMTP worker, and expired pending-account cleanup. No registration or
 verification HTTP routes, browser sessions, OAuth endpoints or example apps exist.
-**Next: hosted registration and verification**, including browser protections and
-shared throttling. The verified-account/two-app milestone remains pending.
+**In progress: hosted registration and verification.** Internal browser-security
+foundations are available; shared throttling and hosted handlers are next. The verified-account/two-app milestone remains pending.
 
 Foundation verification (2026-10-25): all required Rust checks passed; five unit
 tests cover input rules, Unicode/password-byte preservation, salts/costs,
@@ -110,6 +110,34 @@ internal integration checks. Hosted forms, pre-auth CSRF/Origin enforcement,
 durable browser throttling and scanner-GET/confirmation-POST behavior are the next
 increment. These checks do not establish a usable registration flow, login, SSO,
 production SMTP delivery, hashing benchmarks or release readiness.
+
+## Hosted browser foundations (first PR for issue #21)
+
+Implemented: pre-auth cookies with verifier storage and 30-minute expiry,
+action-bound HMAC CSRF, strict Origin checks, escaped Askama layouts/messages/forms,
+security-header/body-limit middleware, and five-minute browser-bound verification
+contexts with a clean-selector redirect hand-off. Context operations do not consume
+verification actions or activate accounts. The production HTTP service still
+exposes only /health. Pre-auth/context expiry cleanup runs in account-cleanup.
+
+Required Rust checks and explicit database suites verify the new migration and
+compatibility with account/mail/lifecycle primitives. The browser tests cover
+ordinary/HTMX checks, template escaping, error headers, body limits, cookie flags,
+CSRF/browser/action binding, repeated/scanner GETs, clean-selector form reload,
+replay and rollback, live binding/deadline checks after lock waits, replacement
+invalidation and bounded cleanup. Commands and integration boundaries are in
+[browser foundations](BROWSER.md). On 2026-10-25, Rust 1.99.1 checks passed:
+format/check/Clippy/test, eight unit tests, three HTTP harness tests, three startup
+tests, all five explicitly invoked PostgreSQL 17 database suites, and startup/HTTP
+health smoke. Relative documentation links and git diff --check also passed.
+An existing lifecycle race assertion was corrected to allow cleanup's documented
+SKIP LOCKED deferral, followed by successful deletion once competing operations end.
+
+The hosted registration/verification checklist item stays unchecked. Remaining
+increments: shared durable throttling; registration/resend handlers; confirmation
+POST/activation integration and the complete local HTTPS/browser/Mailpit fixture.
+No real browser, TLS deployment, hosted form availability or SSO readiness is
+claimed by the Axum/database harness.
 
 ## Milestone decisions
 

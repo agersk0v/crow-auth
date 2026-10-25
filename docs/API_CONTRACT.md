@@ -6,7 +6,11 @@ This document owns milestone endpoint and protocol details, including browser
 and management handlers. **Accepted** means chosen planned behavior; **Deferred**
 is outside this milestone. Neither implies implementation.
 
-The milestone contracts are accepted specifications; implementation is pending.
+The milestone contracts are accepted specifications. Internal account/mail and
+pre-auth/CSRF/verification-context primitives exist, but the browser, OAuth and
+portal endpoints below remain unimplemented. The HTTP service exposes only
+GET /health; see [browser foundations](BROWSER.md) and
+[implementation evidence](IMPLEMENTATION.md) for current status.
 The current server exposes only `GET /health`. See
 [implementation status and evidence](IMPLEMENTATION.md#status-and-readiness).
 

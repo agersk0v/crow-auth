@@ -280,7 +280,8 @@ with an explicit RSA backend/RS256 allowlist for ID-token signing and verificati
 url for parsing registered redirects, and lettre for SMTP. Pin maintained versions
 and audit APIs/advisories at implementation time; a replacement requires updating
 this record. Axum/Tokio/SQLx are already dependencies; the other libraries are not
-all installed. Argon2 and UUID support are installed for account foundations;
+all installed. Argon2/UUID support is installed for account foundations; Askama, HMAC and
+Tower HTTP now support the internal browser foundations;
 no library choice constitutes verified interoperability.
 
 Crow owns OAuth/OIDC server request validation, PKCE S256 calculation, transaction
@@ -424,3 +425,33 @@ The disposable PostgreSQL/SMTP suite exercises both resend-versus-consumption
 orders, concurrent resends and cleaners, delivery/resend serialization, post-wait
 expiry rejection, cascade rollback, reservation reuse and active-account survival.
 These are internal primitives, not hosted registration/verification or login.
+
+## Hosted browser foundations implementation
+
+The browser module implements 30-minute absolute pre-auth state and action-bound
+HMAC-SHA256 CSRF tokens, with hashed random cookie credentials. A canonical HTTPS
+origin is explicit configuration; unsafe requests need exact Origin validation,
+and handlers must also perform the expected action-specific CSRF check. The Axum
+protection layer adds 16 KiB limits, no-store/no-referrer, framing/CSP/nosniff headers
+and Vary: HX-Request. Askama 0.16.1 compiles escaped HTML templates; no safe/raw filter
+is used. HMAC 0.12.1 handles MAC creation/constant-time verification. OSV version
+queries on 2026-10-25 reported no advisories for these two packages; this is not a
+full dependency-graph audit or browser-security certification.
+
+Verification form contexts reference actions rather than retaining emailed tokens.
+Their credentials are domain-separated MACs under each browser's server-held
+secret; only verifiers are stored. A non-secret UUID selector supports a clean
+redirect and browser-bound form reload. Contexts last at most five minutes and
+never extend browser/action/account deadlines. GET preparation/reload does not
+consume an action or activate an account. Context spending locks account, action,
+then context and rechecks authoritative state after waits. It must share the later
+handler's activation transaction; this increment performs no activation itself.
+Pre-auth reads take no row locks before accounts. Browser cleanup takes no
+account/action locks, avoiding inversion with action deletion cascades.
+
+The separate cleanup process erases expired pre-auth/context rows in bounded
+batches. Expiry is enforced independently of cleanup, and replacing an action
+cascades away its contexts. [Browser integration](BROWSER.md) documents commit
+ordering, explicit handler responsibilities and test commands. The production
+service still has only /health: shared throttling, hosted routes, original-flow
+continuation, authenticated sessions and real HTTPS/browser evidence are pending.
