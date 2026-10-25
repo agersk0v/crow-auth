@@ -26,7 +26,7 @@ impl fmt::Display for AccountError {
 }
 impl std::error::Error for AccountError {}
 
-/// Insert only pending accounts. Caller owns the transaction so a future mail
+/// Insert only pending accounts. Caller owns the transaction so the encrypted mail
 /// outbox insert can commit atomically. Return no browser success before commit.
 /// EmailReserved is internal: a future HTTP handler must give a generic response.
 pub async fn create_pending(

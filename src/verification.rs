@@ -9,7 +9,7 @@ use std::fmt;
 use subtle::ConstantTimeEq;
 use uuid::Uuid;
 
-/// A raw credential for the future encrypted outbox. Debug never prints it.
+/// A raw credential for the encrypted outbox. Debug never prints it.
 pub struct VerificationToken(String);
 impl VerificationToken {
     fn generate() -> Result<Self, VerificationError> {
@@ -54,7 +54,7 @@ impl From<sqlx::Error> for VerificationError {
     }
 }
 
-/// Initial issuance only; resend and encrypted outbox integration are follow-up work.
+/// Initial issuance only; use mail::queue_initial for encrypted delivery. Resend is later work.
 /// A pending account is locked before action access. The raw token must only be
 /// handed to encrypted delivery storage, never logs or a registration response.
 pub async fn issue(

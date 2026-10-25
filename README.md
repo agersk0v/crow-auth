@@ -5,7 +5,7 @@ using OpenID Connect.
 
 The service connects to PostgreSQL, runs versioned migrations and serves a health
 endpoint. Account persistence and password-security primitives are implemented;
-registration, email verification and sign-in are not available yet.
+hosted registration, browser email verification and sign-in are not available yet.
 
 ## Run locally
 
@@ -47,9 +47,13 @@ Use the standalone test stack rather than pointing tests at development data:
 ```sh
 docker compose -f compose.test.yaml -p crow-auth-test up -d --wait
 export TEST_DATABASE_URL='postgres://crow_auth_test:<url-encoded-test-password>@127.0.0.1:55432/crow_auth_test'
-# Run both database suites before shutting down:
+# Run the database suites before shutting down:
 cargo test --locked --test accounts_database -- --ignored
 cargo test --locked --test verification_database -- --ignored
+# Mail suite also needs the capture service from this test stack:
+export TEST_SMTP_PORT=1025
+export TEST_MAILPIT_URL=http://127.0.0.1:8025
+cargo test --locked --test mail_database -- --ignored
 docker compose -f compose.test.yaml -p crow-auth-test down
 ```
 
@@ -70,7 +74,9 @@ passwords with Argon2id. It has no registration or login routes and creates no
 browser sessions. Pending accounts carry a 24-hour deadline; releasing expired
 reservations requires the later cleanup implementation. Internal verification-action
 primitives can issue and consume a single initial link and activate a pending
-account atomically. There is no browser verification route or mail delivery yet.
+account atomically. Initial verification can now be queued in an encrypted
+transactional outbox and delivered by a separate SMTP worker. There is no browser
+verification route yet; see [mail setup and operation](docs/MAIL.md).
 See [the primitive contract](docs/ARCHITECTURE.md#verification-action-primitives).
 
 Before building registration/password-change handlers, provision the local
@@ -87,7 +93,7 @@ not a production benchmark. See [foundation evidence](docs/IMPLEMENTATION.md) an
 ## Continuous integration
 
 GitHub Actions runs formatting, compilation, Clippy, unit tests, the account
-and verification-action database suites and a PostgreSQL 17 startup/HTTP health
+verification-action and encrypted-outbox/SMTP-capture suites, and a PostgreSQL 17 startup/HTTP health
 smoke test on pull requests to `main`, pushes to `main`, and
 merge-queue groups. The workflow can also be started manually. To reproduce the
 smoke check locally with a disposable database:
@@ -108,6 +114,7 @@ setting.
 - [Security design](docs/ARCHITECTURE.md): sessions, persistence and enforcement.
 - [OIDC and browser contracts](docs/API_CONTRACT.md): endpoints and validation.
 - [Implementation and acceptance](docs/IMPLEMENTATION.md): build order, readiness and two-app scenario.
+- [Verification mail](docs/MAIL.md): worker configuration, local inbox and delivery guarantees.
 - [Agent guidance](AGENTS.md): working in this repository.
 
 The first milestone requires a verified account to sign into two backend apps
