@@ -1,3 +1,5 @@
+//! Exposes account and password foundations and the versioned migration runner.
+
 pub mod accounts;
 pub mod password;
 pub mod policy;

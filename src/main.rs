@@ -1,3 +1,5 @@
+//! Starts the HTTP service after database connectivity checks and migrations.
+
 use axum::{Router, routing::get};
 use sqlx::postgres::PgPoolOptions;
 use std::{io, time::Duration};

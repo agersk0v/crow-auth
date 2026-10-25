@@ -1,3 +1,5 @@
+//! Canonicalizes and validates usernames and ASCII email addresses before storage.
+
 use std::fmt;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

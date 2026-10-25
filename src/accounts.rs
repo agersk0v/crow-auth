@@ -1,3 +1,6 @@
+//! Persists pending accounts and maps storage conflicts to safe domain errors.
+//! Callers own transactions so account creation can commit atomically with mail.
+
 use crate::{
     password::PasswordDigest,
     policy::{Email, Username},
