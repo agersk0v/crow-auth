@@ -54,6 +54,7 @@ cargo test --locked --test verification_database -- --ignored
 export TEST_SMTP_PORT=1025
 export TEST_MAILPIT_URL=http://127.0.0.1:8025
 cargo test --locked --test mail_database -- --ignored
+cargo test --locked --test lifecycle_database -- --ignored
 docker compose -f compose.test.yaml -p crow-auth-test down
 ```
 
@@ -72,10 +73,10 @@ Startup applies SQLx migrations. The library normalizes usernames/emails, create
 pending account records inside caller-owned transactions, and hashes/verifies
 passwords with Argon2id. It has no registration or login routes and creates no
 browser sessions. Pending accounts carry a 24-hour deadline; releasing expired
-reservations requires the later cleanup implementation. Internal verification-action
-primitives can issue and consume a single initial link and activate a pending
-account atomically. Initial verification can now be queued in an encrypted
-transactional outbox and delivered by a separate SMTP worker. There is no browser
+reservations is handled by the separate `account-cleanup` process. Internal verification primitives issue and consume purpose-bound links and
+activate pending accounts atomically. Initial and resent verification mail can be queued in an encrypted
+transactional outbox and delivered by a separate SMTP worker. Resend invalidates
+all earlier links without changing the password or extending the reservation. There is no browser
 verification route yet; see [mail setup and operation](docs/MAIL.md).
 See [the primitive contract](docs/ARCHITECTURE.md#verification-action-primitives).
 
@@ -92,8 +93,9 @@ not a production benchmark. See [foundation evidence](docs/IMPLEMENTATION.md) an
 
 ## Continuous integration
 
-GitHub Actions runs formatting, compilation, Clippy, unit tests, the account
-verification-action and encrypted-outbox/SMTP-capture suites, and a PostgreSQL 17 startup/HTTP health
+GitHub Actions runs formatting, compilation, Clippy, unit tests, account and
+verification-action tests, encrypted-outbox/SMTP-capture and lifecycle race suites,
+and a PostgreSQL 17 startup/HTTP health
 smoke test on pull requests to `main`, pushes to `main`, and
 merge-queue groups. The workflow can also be started manually. To reproduce the
 smoke check locally with a disposable database:

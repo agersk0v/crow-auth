@@ -1,11 +1,11 @@
-//! Persists pending accounts and maps storage conflicts to safe domain errors.
+//! Persists pending accounts, cleans expired reservations and reports safe storage errors.
 //! Callers own transactions so account creation can commit atomically with mail.
 
 use crate::{
     password::PasswordDigest,
     policy::{Email, Username},
 };
-use sqlx::{Postgres, Transaction};
+use sqlx::{PgPool, Postgres, Transaction};
 use std::fmt;
 use uuid::Uuid;
 
@@ -45,4 +45,43 @@ pub async fn create_pending(
             }
         })?;
     Ok(id)
+}
+
+/// Remove at most one expired pending reservation in an owned transaction.
+/// Skip busy accounts; active accounts are never eligible. Cascading deletion
+/// removes verification actions and encrypted mail in account-first lock order.
+/// Report removal only after confirmed commit; uncertainty returns Unavailable.
+pub async fn cleanup_expired_one(db: &PgPool) -> Result<bool, AccountError> {
+    let mut tx = db.begin().await.map_err(|_| AccountError::Unavailable)?;
+    match cleanup_in_transaction(&mut tx).await {
+        Ok(removed) => {
+            tx.commit().await.map_err(|_| AccountError::Unavailable)?;
+            Ok(removed)
+        }
+        Err(_) => {
+            let _ = tx.rollback().await;
+            Err(AccountError::Unavailable)
+        }
+    }
+}
+
+async fn cleanup_in_transaction(tx: &mut Transaction<'_, Postgres>) -> Result<bool, sqlx::Error> {
+    let account: Option<Uuid> = sqlx::query_scalar(
+        "SELECT id FROM accounts WHERE status='pending' AND pending_expires_at<=clock_timestamp() \
+         ORDER BY pending_expires_at,id LIMIT 1 FOR UPDATE SKIP LOCKED",
+    )
+    .fetch_optional(&mut **tx)
+    .await?;
+    let Some(id) = account else {
+        return Ok(false);
+    };
+    sqlx::query("SELECT id FROM verification_actions WHERE account_id=$1 ORDER BY id FOR UPDATE")
+        .bind(id)
+        .fetch_all(&mut **tx)
+        .await?;
+    // Recheck authoritative status/deadline after locks; never trust a stale scan.
+    let removed = sqlx::query(
+        "DELETE FROM accounts WHERE id=$1 AND status='pending' AND pending_expires_at<=clock_timestamp()",
+    ).bind(id).execute(&mut **tx).await?.rows_affected();
+    Ok(removed == 1)
 }

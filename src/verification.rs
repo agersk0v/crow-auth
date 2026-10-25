@@ -54,7 +54,7 @@ impl From<sqlx::Error> for VerificationError {
     }
 }
 
-/// Initial issuance only; use mail::queue_initial for encrypted delivery. Resend is later work.
+/// Initial issuance only; use mail::queue_initial or mail::queue_resend for delivery.
 /// A pending account is locked before action access. The raw token must only be
 /// handed to encrypted delivery storage, never logs or a registration response.
 pub async fn issue(
@@ -86,6 +86,25 @@ pub async fn issue(
     Ok(token)
 }
 
+/// Replace all earlier links under the account lock. Cascading action deletion
+/// erases unsent mail before the replacement is inserted. Caller MUST roll back
+/// on error, so failed replacement preserves the original action and payload.
+pub(crate) async fn replace(
+    tx: &mut Transaction<'_, Postgres>,
+    account_id: Uuid,
+) -> Result<VerificationToken, VerificationError> {
+    lock_pending(tx, account_id).await?;
+    sqlx::query("SELECT id FROM verification_actions WHERE account_id=$1 ORDER BY id FOR UPDATE")
+        .bind(account_id)
+        .fetch_all(&mut **tx)
+        .await?;
+    sqlx::query("DELETE FROM verification_actions WHERE account_id=$1")
+        .bind(account_id)
+        .execute(&mut **tx)
+        .await?;
+    issue(tx, account_id).await
+}
+
 async fn lock_pending(
     tx: &mut Transaction<'_, Postgres>,
     account_id: Uuid,
@@ -98,6 +117,14 @@ async fn lock_pending(
             .fetch_optional(&mut **tx)
             .await?;
     if status.as_deref() != Some("pending") {
+        return Err(VerificationError::Invalid);
+    }
+    let valid: bool =
+        sqlx::query_scalar("SELECT clock_timestamp()<pending_expires_at FROM accounts WHERE id=$1")
+            .bind(account_id)
+            .fetch_one(&mut **tx)
+            .await?;
+    if !valid {
         return Err(VerificationError::Invalid);
     }
     Ok(())
