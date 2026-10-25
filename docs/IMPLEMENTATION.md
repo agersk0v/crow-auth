@@ -7,8 +7,9 @@ canonical account identifiers and unique reservations, pending/active schema sta
 security versions, Argon2id with bounded workers/queue, and local blocklist
 provisioning. Startup still exposes only GET /health; it now applies migrations.
 Internal initial verification-action issuance and atomic activation are now
-implemented; no registration/verification HTTP routes, account cleanup, mail,
-browser sessions, OAuth endpoints or example apps exist. The account/password
+implemented, with an encrypted transactional outbox and separate SMTP worker
+for initial verification mail. No registration/verification HTTP routes, account
+cleanup, browser sessions, OAuth endpoints or example apps exist. The account/password
 foundation increment is complete; the remaining foundations and verified-account/two-app milestone are
 pending.
 
@@ -42,7 +43,7 @@ milestone. None implies implementation. Follow [AGENTS.md](../AGENTS.md) for che
 Implemented: versioned verification-action storage, 256-bit credentials with hashed
 verifiers and redacted Debug output, initial issuance, and account-first atomic
 consumption/activation without a session. Initial issuance rejects repeat issuance;
-resend requires the later outbox/invalidation increment. The verification-and-mail
+resend requires the remaining invalidation increment. The verification-and-mail
 checklist item remains unchecked until delivery, resend and cleanup are implemented
 and verified together. Hosted registration/verification follows that completed item.
 
@@ -57,6 +58,31 @@ startup/HTTP health smoke test passed. The verification suite exercised migratio
 reruns, malformed/replaced/consumed credentials, account/email/version bindings,
 expiry and post-lock-wait expiry, concurrent consumption and failure rollback.
 No browser or SMTP result is implied by primitive tests.
+
+## Encrypted mail increment (part of issue #17)
+
+Implemented: transactional initial verification-mail queueing, authenticated-encrypted
+recipient/link storage, configured sender/origin/key, a separate mandatory-STARTTLS
+SMTP worker with bounded send/retries, payload erasure, and an isolated Mailpit
+capture inbox. The worker does not apply migrations or expose browser endpoints.
+See [mail operation](MAIL.md) for reproducible configuration and worker commands.
+Resend invalidation and pending-account cleanup are next. The verification-and-mail
+checklist item remains unchecked until these increments are integrated and verified.
+
+Validation uses the required Rust checks plus explicitly invoked account,
+verification and mail suites against disposable PostgreSQL 17 and Mailpit v1.27.0.
+The mail suite covers rollback/outbox failure, encrypted storage and wrong keys,
+concurrent workers, captured-link activation, bounded retries and exhaustion,
+STARTTLS refusal against a plaintext-only relay, expiry/invalidation erasure,
+SMTP acceptance followed by DB failure, and the standalone worker process.
+On 2026-10-25, all required checks passed with Rust 1.99.1: eight unit tests,
+three startup tests, all three explicitly invoked database suites, and the
+PostgreSQL startup/HTTP health smoke test. Reproduce the mail suite with
+`TEST_DATABASE_URL`, `TEST_SMTP_PORT` and `TEST_MAILPIT_URL` set as described in
+[mail operation](MAIL.md), then run
+`cargo test --locked --test mail_database -- --ignored`. Formatting, compilation,
+Clippy, documentation links and `git diff --check` also passed.
+No production SMTP or browser-flow result is implied.
 
 ## Milestone decisions
 
@@ -214,8 +240,8 @@ Owners of behavior are Product, API and Architecture; this matrix defines checks
 
 ## Outstanding limitations and later work
 
-Account/password foundations and internal verification-action primitives have
-implementation evidence recorded above; account lifecycle and OIDC/SSO integration evidence remain outstanding. Example
+Account/password foundations, internal verification actions and initial encrypted
+mail delivery have implementation evidence recorded above; account lifecycle and OIDC/SSO integration evidence remain outstanding. Example
 backends/harness and deployment runbooks must still be built. Library
 versions, Argon2 cost above the specified minimum, mail provider, connection/worker
 budgets and infrastructure timeouts need validation on the target deployment; they

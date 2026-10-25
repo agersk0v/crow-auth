@@ -303,8 +303,8 @@ verification credentials and activation are implemented as described below.
 A future deletion migration must accommodate the specified non-identifying
 tombstone/identity removal; the current identity guard deliberately rejects edits.
 
-`create_pending` takes a caller-owned SQLx transaction so account creation and a
-future encrypted verification-mail outbox can commit together. It inserts only
+`create_pending` takes a caller-owned SQLx transaction so account creation and the
+encrypted verification-mail outbox can commit together. It inserts only
 pending records. The caller must confirm commit before reporting browser success;
 uncertain commits are failures and never justify returning credentials. Email
 conflicts are internal storage outcomes, not an HTTP disclosure policy. Expired
@@ -339,8 +339,9 @@ The `verification` module implements initial action issuance and atomic activati
 in caller-owned transactions. Callers must roll back on every error, including
 storage failures, and report success only after confirmed commit. Initial issuance
 refuses an account with any existing verification action: it is not a resend API.
-The next increment must integrate issuance with an encrypted transactional outbox
-before exposing registration; no delivery payload storage or SMTP worker exists yet.
+The `mail::queue_initial` wrapper now integrates issuance with an encrypted
+transactional outbox. Use it before exposing registration; the raw primitive
+remains available for internal tests and does not queue delivery itself.
 
 Credentials contain 256 OS-random bits encoded as unpadded base64url. Only SHA-256
 verifiers are stored; raw values have redacted Debug output and an explicit secret
@@ -358,7 +359,40 @@ increment or session is created. There is no HTTP endpoint. Future browser handl
 must enforce confirmation POST, pre-auth CSRF/Origin and action-context checks;
 mail-scanner GETs must never call consumption.
 
-Resend invalidation, encrypted mail delivery and pending-account cleanup remain
-unimplemented. PostgreSQL integration tests cover bindings, deadline rejection,
+Encrypted initial mail delivery is implemented as described below. Resend
+invalidation and pending-account cleanup remain unimplemented. PostgreSQL integration tests cover bindings, deadline rejection,
 concurrent consumption, expiry after lock waits, migration reruns and rollback,
 including a simulated activation failure after consumption.
+
+## Encrypted verification outbox implementation
+
+Initial account/action/outbox writes share a caller-owned transaction. Payloads
+contain the recipient and secret link, encrypted with XChaCha20-Poly1305 using a
+separately provisioned 256-bit key, random 192-bit nonces and action UUID associated
+data. `chacha20poly1305` 0.10.1 supplies authenticated encryption; Crow owns nonce
+creation, key provisioning, payload retention and binding. `lettre` 0.11.23 supplies
+SMTP/MIME with mandatory validated STARTTLS and a ten-second total send timeout.
+Both versions are pinned in Cargo.lock; OSV version queries on 2026-10-25 reported
+no advisories. This is not a full dependency audit or production delivery evidence.
+`reqwest` is used only by capture-inbox integration tests.
+
+The separate `mail-worker` checks schema availability without running migrations,
+locks account then action then outbox, and rechecks bindings/deadlines before send.
+Locks remain held during the bounded external operation so activation and future
+resend/cleanup serialize with delivery. Configured sender and link origin are
+independent of request headers; plaintext SMTP is allowed only in explicit local
+capture mode on loopback without SMTP credentials. Credentials/key/payloads never
+appear in errors or worker logs. Role/key provisioning remains operator work.
+
+The initial attempt plus three retries use delays of 1, 5 and 15 minutes from the
+preceding failure, only while valid. Payloads are deleted after delivery, expiry,
+invalidation or exhaustion; invalid/expired jobs are eligible even before their
+next scheduled retry. Wrong keys/corruption fail closed and retain ciphertext for
+operator recovery. Account deletion cancels jobs through cascading foreign keys.
+SMTP acceptance and database commit cannot be atomic: a crash or commit failure
+can duplicate the same link and exceed the committed attempt count. A stable
+Message-ID identifies the action, but is not a deduplication guarantee.
+
+[Mail configuration and operation](MAIL.md) covers worker commands, key handling,
+retry behavior and the isolated local inbox. No hosted form, resend or pending
+reservation cleanup is implemented by this increment.

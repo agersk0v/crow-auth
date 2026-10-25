@@ -9,8 +9,10 @@ Crow Auth uses one Rust service and PostgreSQL.
 The service currently checks database connectivity at startup and exposes
 `GET /health` for basic HTTP liveness. It also applies versioned SQLx migrations.
 Account input rules, pending-account persistence, bounded password hashing and
-internal verification actions/activation live in library modules. No account HTTP
-handlers are implemented yet.
+internal verification actions/activation live in library modules. An encrypted
+transactional mail outbox and a separate SMTP worker deliver initial verification
+links; [mail operation](docs/MAIL.md) documents configuration and guarantees.
+No account HTTP handlers are implemented yet.
 
 Hosted account pages, app management and OpenID Connect are planned to live in
 the same service. Add structure as features need it; keep the design simple.
