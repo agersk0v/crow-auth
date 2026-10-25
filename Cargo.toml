@@ -5,19 +5,5 @@ edition = "2024"
 
 [dependencies]
 axum = "0.8"
-sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls-ring", "postgres", "uuid", "migrate", "macros"] }
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls-ring", "postgres"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net"] }
-askama = "0.14"
-argon2 = "0.5"
-rand = "0.8"
-sha2 = "0.10"
-subtle = "2"
-uuid = { version = "1", features = ["v4"] }
-serde = { version = "1", features = ["derive"] }
-url = "2"
-time = "0.3"
-axum-extra = { version = "0.12", features = ["cookie"] }
-
-[dev-dependencies]
-tower = { version = "0.5", features = ["util"] }
-http-body-util = "0.1"

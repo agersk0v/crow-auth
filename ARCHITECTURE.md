@@ -9,9 +9,7 @@ Crow Auth uses one Rust service and PostgreSQL.
 The service currently checks database connectivity at startup and exposes
 `GET /health` for basic HTTP liveness.
 
-Earlier prototype account pages and sessions now exist; their
-[behavior and gaps](docs/PROTOTYPE.md) differ from the accepted security design.
-App management and OpenID Connect are planned to live in
+Hosted account pages, app management and OpenID Connect are planned to live in
 the same service. Add structure as features need it; keep the design simple.
 
 The [milestone security design](docs/ARCHITECTURE.md) defines planned trust

@@ -1,12 +1,5 @@
 # Crow Auth architecture and security
 
-## Prototype status
-
-An earlier account/session prototype is implemented on this branch. It differs
-from the accepted verified-account milestone below; see
-[prototype behavior, gaps and verification](PROTOTYPE.md). The accepted design
-remains authoritative. No complete milestone verification is claimed.
-
 ## Status and authority
 
 This document owns milestone security enforcement. **Accepted** means chosen

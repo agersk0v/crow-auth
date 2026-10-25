@@ -3,21 +3,60 @@
 A small identity provider for adding **Sign in with Crow** to independent apps
 using OpenID Connect.
 
-The current implementation includes PostgreSQL migrations, HTTP liveness and an
-earlier account/session prototype. It does not yet meet the accepted verified-email
-account lifecycle or two-app milestone; see [prototype gaps](docs/PROTOTYPE.md).
+The current implementation is a Rust HTTP skeleton with PostgreSQL connectivity
+and a health endpoint. Authentication is not implemented yet.
 
 ## Run locally
 
-With stable Rust supporting edition 2024 and a running PostgreSQL database, set
-`DATABASE_URL` to your local connection string, then run:
+Install stable Rust supporting edition 2024 and Docker with Compose v2. Create
+local database settings, edit both password placeholders, then start PostgreSQL:
 
 ```sh
-export APP_ORIGIN='https://crow.example'
+cp .env.example .env
+# Edit .env; keep its passwords private.
+docker compose up -d --wait
+```
+
+Compose runs PostgreSQL 17 on `127.0.0.1:5432`, checks readiness with `pg_isready`,
+and keeps development data in a named volume. Set `DATABASE_URL` in your shell
+using the development password from `.env` (URL-encode special characters):
+
+```sh
+export DATABASE_URL='postgres://crow_auth:<url-encoded-password>@127.0.0.1:5432/crow_auth'
 cargo run --locked
 ```
 
-The server listens on `127.0.0.1:3000`. `GET /health` returns `ok`.
+Compose reads `.env`; `cargo run` does not load it. The URL above is a placeholder.
+If you change `POSTGRES_PORT`, use the same port in `DATABASE_URL`.
+The server listens on `127.0.0.1:3000`. `GET /health` returns `ok`:
+
+```sh
+curl --fail http://127.0.0.1:3000/health
+```
+
+Stop the database with `docker compose down`; its data remains available on the
+next start. `docker compose down -v` **deletes the development database**.
+Changing the password in `.env` does not update an existing database volume;
+change it in PostgreSQL or deliberately recreate disposable local data.
+
+### Disposable test database
+
+Use the standalone test stack rather than pointing tests at development data:
+
+```sh
+docker compose -f compose.test.yaml -p crow-auth-test up -d --wait
+export TEST_DATABASE_URL='postgres://crow_auth_test:<url-encoded-test-password>@127.0.0.1:55432/crow_auth_test'
+# Run database checks against TEST_DATABASE_URL when available.
+docker compose -f compose.test.yaml -p crow-auth-test down
+```
+
+The test stack uses a separate port, database, credentials and project, with
+PostgreSQL data held in tmpfs. Stopping its container discards its data. Use
+`TEST_POSTGRES_PASSWORD` from `.env` in the test URL, and match any custom
+`TEST_POSTGRES_PORT`. Run the test Compose file alone, not as an override of the
+development file. The current Rust tests only check startup configuration; no
+application database integration suite is implemented yet. To smoke-test the
+service against this database, set `DATABASE_URL` to the test URL for that run.
 
 ## Documentation
 
@@ -31,42 +70,4 @@ The server listens on `127.0.0.1:3000`. `GET /health` returns `ok`.
 
 The first milestone requires a verified account to sign into two backend apps
 through one Crow browser session without a second credential prompt. Recovery,
-deletion, app ownership and failure cases are specified; the complete milestone
-remains planned. Prototype evidence is not milestone acceptance.
-
-## Prototype setup and verification
-
-
-Startup applies versioned SQLx migrations. Configure `APP_ORIGIN` as the exact
-canonical HTTPS origin (no trailing slash) served by your TLS reverse proxy;
-forward to the loopback listener. Secure cookies intentionally require HTTPS.
-Do not expose this prototype publicly: shared abuse limits, hashing benchmarks,
-recovery/password replacement and operational readiness remain release gates.
-
-`GET /register` and `GET /login` render ordinary HTML forms. Registration creates
-an account and an eight-hour browser session; login rotates the browser handle.
-`GET /account` shows only the authenticated account. Logout uses a CSRF-protected
-POST and revokes only that browser session. No recovery is available. Anonymous
-form sessions expire after fifteen minutes. Every mutation requires the original
-cookie, form CSRF token and exact configured Origin. HTMX requests use identical
-full-page responses and security controls. There are no OAuth endpoints yet.
-
-Run the required checks:
-
-```sh
-cargo fmt --check
-cargo check --locked
-cargo clippy --locked --all-targets -- -D warnings
-cargo test --locked
-# Explicitly run the database suite against a disposable PostgreSQL instance:
-# TEST_DATABASE_URL uses the same connection-string format as DATABASE_URL.
-cargo test --locked --test browser -- --ignored
-```
-
-The database test requires `TEST_DATABASE_URL`, creates a unique isolated schema
-and drops it on success. It checks migrations, uniqueness and same-browser races,
-CSRF/Origin (including HTMX), rotation/fixation, expiry/logout, persistence across
-router recreation, transaction rollback and database failures. It is explicitly
-ignored by default so missing PostgreSQL cannot silently count as verification.
-See [implementation evidence](docs/IMPLEMENTATION.md) and the
-[prototype decisions and gaps](docs/PROTOTYPE.md).
+deletion, app ownership and failure cases are specified; all remain planned.

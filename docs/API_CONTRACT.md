@@ -1,12 +1,5 @@
 # OAuth 2.0 and OpenID Connect API contract draft
 
-## Prototype status
-
-An earlier account/session prototype is implemented on this branch. It differs
-from the accepted verified-account milestone below; see
-[prototype behavior, gaps and verification](PROTOTYPE.md). The accepted design
-remains authoritative. No complete milestone verification is claimed.
-
 ## Status
 
 This document owns milestone endpoint and protocol details, including browser

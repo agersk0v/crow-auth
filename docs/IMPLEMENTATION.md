@@ -1,12 +1,5 @@
 # First authentication milestone: implementation and evidence
 
-## Current branch implementation status
-
-An earlier account/session prototype is implemented on this branch. It differs
-from the accepted verified-account milestone below; see
-[prototype behavior, gaps and verification](PROTOTYPE.md). The accepted design
-remains authoritative. No complete milestone verification is claimed.
-
 ## Status and readiness
 
 Documentation defines **Accepted planned behavior**, not shipped functionality.
