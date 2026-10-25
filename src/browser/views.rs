@@ -13,17 +13,17 @@ struct MessageTemplate<'a> {
 #[template(path = "verify_email.html")]
 struct ConfirmationTemplate<'a> {
     csrf: &'a str,
-    context: &'a str,
+    token: &'a str,
 }
 
 pub fn message_page(title: &str, message: &str) -> Response {
     render(MessageTemplate { title, message }.render())
 }
-pub fn confirmation_page(csrf: &Secret, context: &Secret) -> Response {
+pub fn confirmation_page(csrf: &Secret, token: &str) -> Response {
     render(
         ConfirmationTemplate {
             csrf: csrf.expose_secret(),
-            context: context.expose_secret(),
+            token,
         }
         .render(),
     )

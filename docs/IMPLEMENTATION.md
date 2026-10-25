@@ -113,31 +113,32 @@ production SMTP delivery, hashing benchmarks or release readiness.
 
 ## Hosted browser foundations (first PR for issue #21)
 
-Implemented: pre-auth cookies with verifier storage and 30-minute expiry,
-action-bound HMAC CSRF, strict Origin checks, escaped Askama layouts/messages/forms,
-security-header/body-limit middleware, and five-minute browser-bound verification
-contexts with a clean-selector redirect hand-off. Context operations do not consume
-verification actions or activate accounts. The production HTTP service still
-exposes only /health. Pre-auth/context expiry cleanup runs in account-cleanup.
+Implemented: signed pre-auth cookies with 30-minute absolute expiry, action-bound
+HMAC CSRF, strict Origin checks, escaped Askama layouts/messages/confirmation forms
+and security-header/body-limit middleware. CSRF validation needs no database lookup.
+The form carries the emailed token and a separate CSRF token in hidden fields.
+No pre-auth or verification-context tables, cleanup, five-minute context deadline
+or pre-render clean redirect are required. The original emailed action remains in
+PostgreSQL for expiry, resend invalidation, single use and activation transactions.
+The production service still exposes only /health; handlers are not enabled.
 
-Required Rust checks and explicit database suites verify the new migration and
-compatibility with account/mail/lifecycle primitives. The browser tests cover
-ordinary/HTMX checks, template escaping, error headers, body limits, cookie flags,
-CSRF/browser/action binding, repeated/scanner GETs, clean-selector form reload,
-replay and rollback, live binding/deadline checks after lock waits, replacement
-invalidation and bounded cleanup. Commands and integration boundaries are in
-[browser foundations](BROWSER.md). On 2026-10-25, Rust 1.99.1 checks passed:
-format/check/Clippy/test, eight unit tests, three HTTP harness tests, three startup
-tests, all five explicitly invoked PostgreSQL 17 database suites, and startup/HTTP
-health smoke. Relative documentation links and git diff --check also passed.
-An existing lifecycle race assertion was corrected to allow cleanup's documented
-SKIP LOCKED deferral, followed by successful deletion once competing operations end.
+Validation covers cookie signing/tampering/expiry/reuse, key/origin/browser/action
+binding, ordinary/HTMX behavior, escaping, request bounds and security headers.
+The explicit PostgreSQL harness connects hidden-field forms to existing action
+consumption, including scanner GETs and PC/phone concurrent confirmations with
+exactly one winner. Configuration and test commands are in
+[browser foundations](BROWSER.md). On 2026-10-25 with Rust 1.99.1, format/check/Clippy/test passed: ten unit tests,
+three HTTP harness tests and three startup tests, plus all five explicitly invoked
+PostgreSQL 17 suites (accounts, verification, mail, lifecycle, browser verification)
+and startup/HTTP health smoke. Mail suites used Mailpit v1.27.0. Documentation links
+and git diff --check passed.
+The existing lifecycle race assertion permits SKIP LOCKED deferral and requires
+successful deletion once competing operations end.
 
-The hosted registration/verification checklist item stays unchecked. Remaining
-increments: shared durable throttling; registration/resend handlers; confirmation
-POST/activation integration and the complete local HTTPS/browser/Mailpit fixture.
-No real browser, TLS deployment, hosted form availability or SSO readiness is
-claimed by the Axum/database harness.
+The hosted registration/verification checklist stays unchecked. Remaining PRs:
+shared durable throttling; registration/resend handlers; confirmation activation
+handlers and a complete local HTTPS/browser/Mailpit fixture. No real-browser, TLS,
+hosted-route or SSO readiness is claimed by the Axum/PostgreSQL harness.
 
 ## Milestone decisions
 

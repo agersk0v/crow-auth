@@ -1,4 +1,4 @@
-//! Removes expired pending accounts and browser state independently of SMTP.
+//! Removes expired pending accounts independently of SMTP configuration and delivery.
 
 use crow_auth::accounts::cleanup_expired_one;
 use sqlx::postgres::PgPoolOptions;
@@ -19,7 +19,7 @@ async fn main() -> io::Result<()> {
         .connect(&url)
         .await
         .map_err(|_| io::Error::other("Cleanup database unavailable"))?;
-    sqlx::query("SELECT a.id FROM accounts a LEFT JOIN verification_actions v ON v.account_id=a.id LEFT JOIN verification_mail_outbox q ON q.action_id=v.id LEFT JOIN preauth_browsers b ON false LEFT JOIN verification_contexts c ON c.browser_id=b.id LIMIT 0")
+    sqlx::query("SELECT a.id FROM accounts a LEFT JOIN verification_actions v ON v.account_id=a.id LEFT JOIN verification_mail_outbox q ON q.action_id=v.id LIMIT 0")
         .execute(&db)
         .await
         .map_err(|_| io::Error::other("Account schema unavailable; apply migrations first"))?;
@@ -31,12 +31,6 @@ async fn main() -> io::Result<()> {
             Ok(false) => {}
             Err(_) if once => return Err(io::Error::other("Cleanup storage unavailable")),
             Err(_) => eprintln!("Cleanup: storage unavailable"),
-        }
-        if crow_auth::browser::cleanup_expired(&db).await.is_err() {
-            if once {
-                return Err(io::Error::other("Browser cleanup storage unavailable"));
-            }
-            eprintln!("Cleanup: browser storage unavailable");
         }
         if once {
             break;

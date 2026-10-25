@@ -35,7 +35,11 @@ A duplicate pending registration may request resend but cannot replace its passw
 
 Verification credentials expire after 30 minutes, are single-use and bound to the
 account/email and action purpose. Resend invalidates earlier verification links.
-Following an emailed GET only renders a confirmation form; POST consumes the link.
+Following an emailed GET only renders a confirmation form with hidden verification
+and CSRF tokens; POST consumes the link. The token can remain in the initial URL
+until POST, with no-store/no-referrer and redacted logs. No separate browser-bound
+verification-context record or five-minute form deadline is required. Opening the
+email on another device is supported using that browser's own pre-auth cookie/CSRF.
 Verification activates the account but does not sign in the link-opening browser.
 Require password sign-in after verification. An unverified password sign-in grants
 no SSO/portal session; show verification/resend guidance after valid credentials.

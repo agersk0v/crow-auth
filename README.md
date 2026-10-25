@@ -50,7 +50,7 @@ export TEST_DATABASE_URL='postgres://crow_auth_test:<url-encoded-test-password>@
 # Run the database suites before shutting down:
 cargo test --locked --test accounts_database -- --ignored
 cargo test --locked --test verification_database -- --ignored
-cargo test --locked --test browser_database -- --ignored
+cargo test --locked --test browser_verification -- --ignored
 # Mail suite also needs the capture service from this test stack:
 export TEST_SMTP_PORT=1025
 export TEST_MAILPIT_URL=http://127.0.0.1:8025
@@ -94,9 +94,10 @@ not a production benchmark. See [foundation evidence](docs/IMPLEMENTATION.md) an
 
 ## Hosted browser foundations
 
-The library now includes pre-auth/CSRF state, strict Origin validation, escaped
-Askama templates, security-header/body-limit middleware and short-lived
-verification contexts. These are tested primitives; they are not yet exposed by
+The library now includes signed pre-auth cookies, action-bound CSRF, strict Origin
+validation, escaped Askama templates and security-header/body-limit middleware.
+Verification forms use hidden email-token and CSRF fields with no browser-state
+or confirmation-context tables. These are tested primitives; they are not yet exposed by
 the health-only HTTP service. See [browser integration and limits](docs/BROWSER.md).
 Shared throttling and hosted registration/verification handlers remain next.
 
@@ -104,7 +105,7 @@ Shared throttling and hosted registration/verification handlers remain next.
 
 GitHub Actions runs formatting, compilation, Clippy, unit tests, account and
 verification-action tests, encrypted-outbox/SMTP-capture and lifecycle race suites,
-browser security/confirmation-context checks, and a PostgreSQL 17 startup/HTTP health
+signed-cookie CSRF/verification checks, and a PostgreSQL 17 startup/HTTP health
 smoke test on pull requests to `main`, pushes to `main`, and
 merge-queue groups. The workflow can also be started manually. To reproduce the
 smoke check locally with a disposable database:
@@ -126,7 +127,7 @@ setting.
 - [OIDC and browser contracts](docs/API_CONTRACT.md): endpoints and validation.
 - [Implementation and acceptance](docs/IMPLEMENTATION.md): build order, readiness and two-app scenario.
 - [Verification mail](docs/MAIL.md): worker configuration, local inbox and delivery guarantees.
-- [Browser foundations](docs/BROWSER.md): pre-auth, CSRF, form contexts and integration boundaries.
+- [Browser foundations](docs/BROWSER.md): signed cookies, CSRF, hidden fields and integration boundaries.
 - [Agent guidance](AGENTS.md): working in this repository.
 
 The first milestone requires a verified account to sign into two backend apps

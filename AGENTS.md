@@ -4,6 +4,12 @@ Read [README.md](README.md), [PRODUCT.md](PRODUCT.md) and
 [ARCHITECTURE.md](ARCHITECTURE.md) before making changes.
 
 - Keep changes focused on the request and the implementation simple.
+- Before and during implementation, check for unnecessary complexity in what you
+  are building. If a materially simpler solution meets the current needs, explain
+  it to the user with its tradeoffs and recommend the simpler option before adding
+  extra tables, abstractions, services or dependencies. Surface any specification
+  changes it needs; do not silently change accepted behavior. This is a design
+  check, not a reason to pause routine work already authorized by the user.
 - Clearly distinguish planned features from working code.
 - Update documentation when behavior changes; keep it brief.
 - Start each source file with a short comment explaining its purpose and

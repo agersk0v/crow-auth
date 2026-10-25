@@ -77,15 +77,19 @@ Cookie-authenticated mutations, including login/registration, require CSRF token
 and validated Origin checks. Protect pages against framing, escape untrusted
 template content, bound request sizes and prevent sensitive-response caching.
 SameSite and CORS are not substitutes for CSRF or authorization. HTMX requests
-receive the same checks as ordinary forms. Issue a 256-bit random host-only pre-auth browser cookie and server-side CSRF
-secret on the first form GET. Forms carry a synchronizer token bound to that
-browser context and action; compare in constant time. Require Origin to equal the
-configured Crow origin on every browser POST; reject absent/null/mismatched
+receive the same checks as ordinary forms. Use a signed host-only pre-auth cookie
+with a fresh 256-bit random nonce and issue time, and a 30-minute absolute expiry.
+Authenticate it under a separately provisioned key shared across instances;
+derive a hidden browser/action-bound CSRF token with domain-separated HMAC-SHA256
+and compare in constant time. No pre-auth table is required. Require Origin to
+equal the configured Crow origin on every browser POST; reject absent/null/mismatched
 Origin with 403. Rotate CSRF state with credential login. Keep the independent
 browser flow binding stable across session rotation so unauthenticated tabs may
 continue; invalidate already-authenticated flows tied to the replaced session.
 Use `__Host-` cookies with Path=/ and no Domain. Never accept flow IDs as CSRF.
-A missing/stale CSRF token returns 403 with a restart link and no mutation.
+A missing/stale CSRF token returns 403 with a restart link and no mutation. These
+pre-auth primitives protect unauthenticated forms; authenticated form CSRF must
+also bind to the current Crow login session.
 
 Top-level redirects are the supported SSO path. Hidden iframes and third-party
 cookies are not a reliability requirement.
@@ -255,11 +259,15 @@ secret: encrypt payloads at rest using a separately provisioned key, restrict wo
 access, never log payloads and erase on delivery or expiry. Resend/new reset removes
 older unsent payloads. Sender and link origin are deployment configuration, never
 request Host/forwarded headers. Account deletion cancels all existing delivery jobs.
-Verification/reset confirmations require pre-auth CSRF and the action context,
-not possession of a flow ID. Browser-bound action contexts live for at most five
-minutes and never extend the original link deadline. Consuming an email-link GET
-into a context must not invalidate the link: mail scanners cannot consume it;
-only the confirmed POST does. Invalid links expose no account identity.
+Verification/reset confirmations require valid signed pre-auth state, action-specific
+CSRF and the emailed action token in hidden POST fields, not possession of a flow ID.
+GET may render the form directly at the token URL; no server-held form context or
+pre-render clean redirect is required. Only the protected POST consumes the action.
+The token's original deadline and pending-account expiry remain authoritative;
+rendering a form does not extend them. Keep no-store/no-referrer, no third-party
+assets and redacted logs. Invalid links expose no account identity. Opening the
+email in another browser is allowed, with that browser's own cookie and CSRF;
+email links never transfer an original app-flow binding or create a session.
 
 Deletion locks the account, then all owned apps in sorted order and marks an
 irreversible deleted tombstone. Delete personal records and revoke credentials
@@ -357,7 +365,7 @@ the account before the action, then rereads bindings and database time after loc
 waits. Both action and pending-account deadlines must remain valid. Consuming the
 action and setting active/verified state share the transaction; no security-version
 increment or session is created. There is no HTTP endpoint. Future browser handlers
-must enforce confirmation POST, pre-auth CSRF/Origin and action-context checks;
+must enforce confirmation POST, pre-auth CSRF/Origin and emailed-token checks;
 mail-scanner GETs must never call consumption.
 
 Encrypted initial/resend delivery and pending-account cleanup are implemented
@@ -428,30 +436,31 @@ These are internal primitives, not hosted registration/verification or login.
 
 ## Hosted browser foundations implementation
 
-The browser module implements 30-minute absolute pre-auth state and action-bound
-HMAC-SHA256 CSRF tokens, with hashed random cookie credentials. A canonical HTTPS
-origin is explicit configuration; unsafe requests need exact Origin validation,
-and handlers must also perform the expected action-specific CSRF check. The Axum
+The browser module uses a signed cookie containing a version, UTC issue time and
+256-bit random nonce, expiring after 30 minutes without sliding extension.
+HMAC-SHA256 binds the cookie to purpose and the canonical configured HTTPS origin;
+a different MAC domain derives browser-specific CSRF secrets and action tokens.
+The signing key is separately provisioned, stable across restarts and shared by
+instances. There is no pre-auth/context table, database CSRF lookup or cleanup.
+Key replacement invalidates outstanding pre-auth forms; individual revocation and
+key overlap are not part of this minimal unauthenticated-browser primitive.
+
+POST requires an exact Origin match and an action-specific CSRF check. The Axum
 protection layer adds 16 KiB limits, no-store/no-referrer, framing/CSP/nosniff headers
-and Vary: HX-Request. Askama 0.16.1 compiles escaped HTML templates; no safe/raw filter
-is used. HMAC 0.12.1 handles MAC creation/constant-time verification. OSV version
-queries on 2026-10-25 reported no advisories for these two packages; this is not a
-full dependency-graph audit or browser-security certification.
+and Vary: HX-Request; handlers still need the explicit CSRF authorization call.
+Askama 0.16.1 renders escaped templates, including separate hidden CSRF and emailed
+verification-token fields. HMAC 0.12.1 supplies constant-time MAC verification.
+OSV version queries on 2026-10-25 reported no advisories for these two packages;
+this is not a full dependency-graph audit or browser-security certification.
 
-Verification form contexts reference actions rather than retaining emailed tokens.
-Their credentials are domain-separated MACs under each browser's server-held
-secret; only verifiers are stored. A non-secret UUID selector supports a clean
-redirect and browser-bound form reload. Contexts last at most five minutes and
-never extend browser/action/account deadlines. GET preparation/reload does not
-consume an action or activate an account. Context spending locks account, action,
-then context and rechecks authoritative state after waits. It must share the later
-handler's activation transaction; this increment performs no activation itself.
-Pre-auth reads take no row locks before accounts. Browser cleanup takes no
-account/action locks, avoiding inversion with action deletion cascades.
+The emailed token remains in the initial URL/form until POST; no pre-render clean
+redirect is required. GET does not mutate verification state. The future handler
+must validate signed-cookie CSRF/Origin before consuming the existing verification
+action in a transaction and redirect only after confirmed commit. PostgreSQL keeps
+single-use/expiry/resend/account-state enforcement. No extra form-context lifetime
+is introduced, and verification remains possible from another browser/device.
 
-The separate cleanup process erases expired pre-auth/context rows in bounded
-batches. Expiry is enforced independently of cleanup, and replacing an action
-cascades away its contexts. [Browser integration](BROWSER.md) documents commit
-ordering, explicit handler responsibilities and test commands. The production
-service still has only /health: shared throttling, hosted routes, original-flow
-continuation, authenticated sessions and real HTTPS/browser evidence are pending.
+[Browser integration](BROWSER.md) documents configuration, signing-key operation,
+hidden fields and remaining handler responsibilities. The production service still
+has only /health. Shared throttling, hosted routes, original-flow continuation,
+authenticated sessions and real HTTPS/browser evidence remain pending.

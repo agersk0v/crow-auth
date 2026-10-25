@@ -10,12 +10,15 @@ use crow_auth::browser::{BrowserError, BrowserSecurity, message_page};
 use serde::Deserialize;
 use tower::ServiceExt;
 
+fn key() -> String {
+    base64::Engine::encode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, [7; 32])
+}
 #[derive(Deserialize)]
 struct Fields {
     value: String,
 }
 fn app() -> Router {
-    BrowserSecurity::new("https://crow.localhost:3000")
+    BrowserSecurity::new("https://crow.localhost:3000", &key())
         .unwrap()
         .protect(
             Router::new()
@@ -167,9 +170,9 @@ fn only_canonical_https_origins_are_accepted() {
         "https://crow.test:443",
     ] {
         assert!(matches!(
-            BrowserSecurity::new(origin),
+            BrowserSecurity::new(origin, &key()),
             Err(BrowserError::Configuration)
         ));
     }
-    assert!(BrowserSecurity::new("https://crow.test").is_ok());
+    assert!(BrowserSecurity::new("https://crow.test", &key()).is_ok());
 }

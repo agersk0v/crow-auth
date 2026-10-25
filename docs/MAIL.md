@@ -142,10 +142,9 @@ cargo run --locked --bin account-cleanup -- --once
 ```
 
 It needs only `DATABASE_URL`, checks existing schema without DDL, processes at most
-one account per poll and sleeps one second between polls. It also removes expired
-pre-auth browsers and verification contexts in bounded batches; see
-[browser foundations](BROWSER.md) for the new table permissions and limits. Multiple cleaners skip
-locked accounts. In an account-first transaction it checks `now >= pending_expires_at`,
+one account per poll and sleeps one second between polls. Signed pre-auth
+cookies need no database records or cleanup; see [browser foundations](BROWSER.md).
+Multiple cleaners skip locked accounts. In an account-first transaction it checks `now >= pending_expires_at`,
 locks dependent actions, rechecks eligibility, then deletes the account; foreign
 keys erase actions and encrypted jobs. Only committed removal releases the unique
 username/email reservations. Active accounts are never eligible, even after their
