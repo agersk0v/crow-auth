@@ -1,10 +1,14 @@
-# OAuth 2.0 and OpenID Connect API contract draft
+# OAuth 2.0 and OpenID Connect API contract
 
 ## Status
 
 This document owns milestone endpoint and protocol details, including browser
 and management handlers. **Accepted** means chosen planned behavior; **Deferred**
 is outside this milestone. Neither implies implementation.
+
+The milestone contracts are accepted specifications; implementation is pending.
+The current server exposes only `GET /health`. See
+[implementation status and evidence](IMPLEMENTATION.md#status-and-readiness).
 
 Follow OIDC Core, OAuth 2.0 security best practice (RFC 9700), PKCE (RFC 7636),
 discovery, Bearer token usage and RFC 7009 revocation for supported features.
