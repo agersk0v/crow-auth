@@ -58,6 +58,10 @@ jobs:
         env:
           TEST_DATABASE_URL: postgres://crow_auth_ci:ci-only-password@127.0.0.1:5432/crow_auth_ci
         run: cargo test --locked --test accounts_database -- --ignored
+      - name: Check verification actions and activation races
+        env:
+          TEST_DATABASE_URL: postgres://crow_auth_ci:ci-only-password@127.0.0.1:5432/crow_auth_ci
+        run: cargo test --locked --test verification_database -- --ignored
       - name: Check database startup and HTTP health
         env:
           DATABASE_URL: postgres://crow_auth_ci:ci-only-password@127.0.0.1:5432/crow_auth_ci

@@ -298,8 +298,8 @@ canonical unique ASCII username/email, immutable UUID/username/email, pending or
 active status, verification timestamp, monotonic nonnegative security_version,
 and a pending reservation deadline exactly 24 hours after creation. Database
 constraints complement Rust input types; no provider email alias rules apply.
-Active state requires a verification timestamp. There is no activation endpoint,
-verification credential, cleanup job or login permission in this implementation.
+Active state requires a verification timestamp. There is no activation endpoint, cleanup job or login permission. Internal
+verification credentials and activation are implemented as described below.
 A future deletion migration must accommodate the specified non-identifying
 tombstone/identity removal; the current identity guard deliberately rejects edits.
 
@@ -332,3 +332,33 @@ distributed throttling and same-cost unknown-user verification remain login work
 The dataset version, checksum and monthly update instructions are in
 [data/README.md](../data/README.md); loading occurs at service initialization.
 The health-only HTTP server does not construct a password service yet.
+
+## Verification-action primitives
+
+The `verification` module implements initial action issuance and atomic activation
+in caller-owned transactions. Callers must roll back on every error, including
+storage failures, and report success only after confirmed commit. Initial issuance
+refuses an account with any existing verification action: it is not a resend API.
+The next increment must integrate issuance with an encrypted transactional outbox
+before exposing registration; no delivery payload storage or SMTP worker exists yet.
+
+Credentials contain 256 OS-random bits encoded as unpadded base64url. Only SHA-256
+verifiers are stored; raw values have redacted Debug output and an explicit secret
+accessor for encrypted delivery integration. The maintained existing rand_core
+OsRng supplies randomness, base64 supplies canonical encoding, sha2 computes the
+verifier and subtle supplies constant-time verifier comparison. These libraries
+do not enforce lifecycle or transaction semantics; Crow does.
+
+Actions bind purpose, account, canonical email and security version, with a
+30-minute deadline. Consumption discovers account metadata without locking, locks
+the account before the action, then rereads bindings and database time after lock
+waits. Both action and pending-account deadlines must remain valid. Consuming the
+action and setting active/verified state share the transaction; no security-version
+increment or session is created. There is no HTTP endpoint. Future browser handlers
+must enforce confirmation POST, pre-auth CSRF/Origin and action-context checks;
+mail-scanner GETs must never call consumption.
+
+Resend invalidation, encrypted mail delivery and pending-account cleanup remain
+unimplemented. PostgreSQL integration tests cover bindings, deadline rejection,
+concurrent consumption, expiry after lock waits, migration reruns and rollback,
+including a simulated activation failure after consumption.

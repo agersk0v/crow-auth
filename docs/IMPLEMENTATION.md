@@ -6,9 +6,10 @@ Account/password foundations from issue #13 are implemented: versioned migration
 canonical account identifiers and unique reservations, pending/active schema state,
 security versions, Argon2id with bounded workers/queue, and local blocklist
 provisioning. Startup still exposes only GET /health; it now applies migrations.
-No registration/verification, account cleanup, mail, browser sessions, OAuth
-endpoints or example apps exist. The account/password foundation increment is
-complete; the remaining foundations and verified-account/two-app milestone are
+Internal initial verification-action issuance and atomic activation are now
+implemented; no registration/verification HTTP routes, account cleanup, mail,
+browser sessions, OAuth endpoints or example apps exist. The account/password
+foundation increment is complete; the remaining foundations and verified-account/two-app milestone are
 pending.
 
 Foundation verification (2026-10-25): all required Rust checks passed; five unit
@@ -35,6 +36,27 @@ security enforcement, and [API contract](API_CONTRACT.md) owns protocol details.
 This document owns build order and evidence. **Accepted** means chosen planned
 behavior; **Unresolved** marks a future decision; **Deferred** is outside this
 milestone. None implies implementation. Follow [AGENTS.md](../AGENTS.md) for checks.
+
+## Verification-action increment (part of issue #17)
+
+Implemented: versioned verification-action storage, 256-bit credentials with hashed
+verifiers and redacted Debug output, initial issuance, and account-first atomic
+consumption/activation without a session. Initial issuance rejects repeat issuance;
+resend requires the later outbox/invalidation increment. The verification-and-mail
+checklist item remains unchecked until delivery, resend and cleanup are implemented
+and verified together. Hosted registration/verification follows that completed item.
+
+Verification commands (2026-10-25): `cargo fmt --check`, `cargo check --locked`,
+`cargo clippy --locked --all-targets -- -D warnings`, `cargo test --locked`,
+`cargo test --locked --test accounts_database -- --ignored`, and
+`cargo test --locked --test verification_database -- --ignored`. Database suites
+require `TEST_DATABASE_URL` pointing to disposable PostgreSQL 17 and run explicitly
+in CI. All checks passed using Rust 1.99.1 and disposable PostgreSQL 17; six
+unit tests, two startup tests, both explicitly invoked database suites and the
+startup/HTTP health smoke test passed. The verification suite exercised migration
+reruns, malformed/replaced/consumed credentials, account/email/version bindings,
+expiry and post-lock-wait expiry, concurrent consumption and failure rollback.
+No browser or SMTP result is implied by primitive tests.
 
 ## Milestone decisions
 
@@ -192,8 +214,8 @@ Owners of behavior are Product, API and Architecture; this matrix defines checks
 
 ## Outstanding limitations and later work
 
-Only the account/password foundations have implementation evidence recorded above;
-account lifecycle and OIDC/SSO integration evidence remain outstanding. Example
+Account/password foundations and internal verification-action primitives have
+implementation evidence recorded above; account lifecycle and OIDC/SSO integration evidence remain outstanding. Example
 backends/harness and deployment runbooks must still be built. Library
 versions, Argon2 cost above the specified minimum, mail provider, connection/worker
 budgets and infrastructure timeouts need validation on the target deployment; they
